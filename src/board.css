@@ -1,0 +1,24 @@
+/* Officer-first layout: the board owns the screen; the roster remains a source sidebar. */
+.planner-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(275px, 23%); gap: 18px; align-items: start; }
+.builder-workspace { min-width: 0; border: 1px solid #303651; border-radius: 10px; background: #121629; padding: 16px; }
+.builder-heading { display: flex; justify-content: space-between; align-items: center; padding: 2px 2px 15px; border-bottom: 1px solid #303651; }
+.builder-heading h2, .sidebar-header h2 { margin: 5px 0 0; font: 700 21px Cinzel, serif; }
+.builder-heading > span, .sidebar-header > span { color: #a7afd0; font-size: 11px; background: #232842; border-radius: 20px; padding: 6px 9px; }
+.lane-row { padding: 15px 0; border-bottom: 1px solid #2b3049; }
+.lane-row:last-child { border-bottom: 0; }
+.lane-row > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.lane-row h3 { margin: 4px 0 0; font: 700 15px Cinzel, serif; letter-spacing: .04em; }
+.lane-parties { display: grid; gap: 12px; padding: 2px 2px 9px; }
+.party-card { width: 100%; border: 1px solid #3b4160; border-radius: 7px; overflow: hidden; background: #181c30; }
+.party-card > header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #222742; }
+.party-card header strong { display: block; font-size: 14px; }.party-card header small { color: #a2abcc; font-size: 11px; }
+.party-slots { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 10px; }
+.party-slots .team-slot { height: 128px; min-width: 0; }.party-slots .team-slot > span { text-align: center; line-height: 1.5; }
+.party-slots .member-card.compact { width: 100%; height: 100%; min-height: 126px; padding: 13px 11px; display: flex; flex-direction: column; align-items: stretch; justify-content: center; }
+.party-slots .member-top { font-size: 14px; }.party-slots .class-tag { white-space: normal; line-height: 1.35; font-size: 11px; margin: 8px 0; }.compact-details { display: flex; flex-direction: column; gap: 3px; color: #e2e6f7; font-size: 12px; font-weight: 700; }.compact-details small { color: #99a3c6; font-weight: 400; }
+.add-party, .remove-party { border: 1px solid #5c6488; background: #222741; color: #d2d9f2; border-radius: 5px; padding: 7px 10px; font-size: 11px; font-weight: 700; }.add-party { border-style: dashed; color: #e2c474; }.add-party:disabled { opacity: .45; cursor: not-allowed; }.remove-party { color: #ec9da3; border-color: #70434f; }
+.member-sidebar { position: sticky; top: 94px; max-height: calc(100vh - 112px); overflow: hidden auto; border: 1px solid #303651; border-radius: 10px; background: #121629; padding: 15px; }.sidebar-header { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px; padding-bottom: 14px; }.sidebar-header .eyebrow { grid-column: 1 / -1; }.sidebar-header h2 { font-size: 17px; }
+.member-sidebar label { display: grid; gap: 6px; color: #aeb6d4; font-size: 11px; font-weight: 700; margin-bottom: 11px; }.member-sidebar input, .member-sidebar select { width: 100%; border: 1px solid #353b59; border-radius: 5px; background: #191e32; color: #e6eaff; padding: 10px; }.pool-drop { display: grid; gap: 9px; min-height: 70px; }.pool-drop.over { outline: 1px dashed #e0bc6a; background: #2b2941; }.member-sidebar .member-card.compact { min-height: 108px; padding: 14px; }.member-sidebar .member-top { font-size: 15px; }.member-sidebar .class-tag { font-size: 12px; margin: 8px 0; }.sidebar-empty { color: #8d96b6; font-size: 12px; text-align: center; padding: 12px 0; }
+ .team-actions { display: flex; gap: 9px; align-items: center; }.clear-button { border: 1px solid #76505b; border-radius: 5px; background: #2a1c27; color: #f0a9b0; padding: 11px 15px; font-weight: 700; }
+@media (max-width: 1100px) { .planner-layout { grid-template-columns: 1fr; }.member-sidebar { position: static; max-height: none; }.pool-drop { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); } }
+@media (max-width: 620px) { .builder-workspace { padding: 11px; }.planner-layout { gap: 12px; }.party-slots { grid-template-columns: repeat(5, 1fr); } }

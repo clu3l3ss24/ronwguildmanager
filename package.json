@@ -1,0 +1,24 @@
+{
+  "name": "row-guild-manager",
+  "version": "1.0.0",
+  "description": "Ragnarok: The New World guild roster and team planner",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "firebase": "^11.10.0",
+    "papaparse": "^5.5.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "vite": "^7.1.3"
+  },
+  "private": true
+}
