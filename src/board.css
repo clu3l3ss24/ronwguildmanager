@@ -1,3 +1,9 @@
+.member-card .class-tag { display: flex; align-items: center; gap: 7px; }
+.upload-panel .import-message.import-error { color: #ffd2dc !important; background: #3b2030; }
+.upload-panel button:disabled { opacity: .6; cursor: wait; }
+.job-icon { display: inline-flex; flex: 0 0 30px; width: 30px; height: 30px; overflow: hidden; border-radius: 7px; pointer-events: none; }
+.job-icon > span { display: block; flex: 0 0 44px; width: 44px; height: 44px; background-repeat: no-repeat; transform: scale(.681818); transform-origin: top left; }
+.job-icon-unknown { align-items: center; justify-content: center; background: #303651; color: #c1c6df; font-size: 16px; font-weight: 700; }
 /* Officer-first layout: the board owns the screen; the roster remains a source sidebar. */
 .planner-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(275px, 23%); gap: 18px; align-items: start; }
 .builder-workspace { min-width: 0; border: 1px solid #303651; border-radius: 10px; background: #121629; padding: 16px; }

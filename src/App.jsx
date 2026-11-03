@@ -1,41 +1,193 @@
-import { useEffect, useState } from 'react';
-import { collection, deleteDoc, doc, getDocs, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+﻿import { useEffect, useRef, useState } from 'react';
+import { collection, deleteDoc, doc, onSnapshot, runTransaction, serverTimestamp, setDoc } from 'firebase/firestore';
+import { signOut } from 'firebase/auth';
 import Navbar from './components/Navbar'; import Dashboard from './pages/Dashboard'; import Members from './pages/Members'; import Teams from './pages/Teams';
 import { auth, db, firebaseEnabled } from './firebase/config';
+import AccountGate from './components/AccountGate';
+import { advanceHistory, emptyHistory, formationMemberNames, prepareFormation } from './firebase/teams';
+import { autoBalanceBoard, blankBoard, boardError, BOARD_MODES, changeBoardMode, formationSaveError, normalizeBoard, serializeBoard } from './firebase/board';
+import { prepareRosterImport, replaceGuildRoster } from './firebase/importRoster';
 
-const blankTeams = () => ({ top: [], middle: [], bottom: [], flex: [] });
-const autoBalanceTeams = () => ({ top: Array.from({ length: 3 }, () => Array(5).fill(null)), middle: Array.from({ length: 3 }, () => Array(5).fill(null)), bottom: Array.from({ length: 3 }, () => Array(5).fill(null)), flex: Array.from({ length: 3 }, () => Array(5).fill(null)) });
-// Preserves saved manual parties, including legacy single-party lane saves.
-const normalizeTeams = teams => Object.fromEntries(['top', 'middle', 'bottom', 'flex'].map(lane => [lane, Array.isArray(teams?.[lane]?.[0]) ? teams[lane] : Array.isArray(teams?.[lane]) ? [teams[lane]] : []]));
 const seedMembers = [];
 const stored = key => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
 export default function App() {
-  const [page, setPage] = useState('dashboard'); const [role, setRole] = useState('Guild Master');
-  const [user, setUser] = useState(null);
-  const [members, setMembers] = useState(() => stored('row-members') || seedMembers); const [teams, setTeams] = useState(() => normalizeTeams(stored('row-teams') || blankTeams()));
-  const [savedTeams, setSavedTeams] = useState(() => stored('row-saved-teams') || []);
-  useEffect(() => { if (!firebaseEnabled) return; return onSnapshot(collection(db, 'members'), snap => setMembers(snap.docs.map(item => ({ id: item.id, ...item.data() })))); }, []);
-  useEffect(() => { if (!firebaseEnabled) return; return onAuthStateChanged(auth, setUser); }, []);
+  return <AccountGate>{session => <GuildWorkspace key={`${session.user?.uid || 'local-demo'}:${session.guild?.id || ''}`} {...session} />}</AccountGate>;
+}
+function GuildWorkspace({ user, guild, exitDemo, role = 'Guild Master' }) {
+  const [page, setPage] = useState('dashboard');
+  const [error, setError] = useState('');
+  const [loaded, setLoaded] = useState(!firebaseEnabled);
+  const [members, setMembers] = useState(() => firebaseEnabled ? [] : stored('row-members') || seedMembers);
+  const [board, setBoard] = useState(() => normalizeBoard(firebaseEnabled ? blankBoard() : stored('row-teams') || blankBoard()));
+  const teams = board.teams;
+  const [savedTeams, setSavedTeams] = useState(() => firebaseEnabled ? [] : (stored('row-saved-teams') || []).map(item => ({ ...item, ...normalizeBoard(item) })));
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [activeSaveId, setActiveSaveId] = useState(null);
+  const [history, setHistory] = useState(emptyHistory);
+  const historyRef = useRef(history);
+  const boardRef = useRef(board);
+  const boardVersionRef = useRef(null);
+  const localEditRef = useRef(null);
+  const operationRef = useRef(false);
+  const updateHistory = next => { historyRef.current = next; setHistory(next); };
+  const guildId = guild?.id;
+  useEffect(() => {
+    if (!firebaseEnabled) return;
+    let active = true;
+    const ready = new Set();
+    const mark = key => { ready.add(key); if (active && ready.size === 3) setLoaded(true); };
+    const failed = () => { if (active) setError('Could not load your guild. Check your connection and Firestore rules, then reload.'); };
+    const unsubscribers = [
+      onSnapshot(collection(db, 'guilds', guildId, 'members'), snap => { if (active) { setMembers(snap.docs.map(item => ({ ...item.data(), id: item.id }))); mark('members'); } }, failed),
+      onSnapshot(doc(db, 'guilds', guildId), snap => { if (active && snap.exists()) {
+        const next = normalizeBoard(snap.data().teams);
+        const version = snap.data().boardEditId || null;
+        const changed = JSON.stringify(next) !== JSON.stringify(boardRef.current) || version !== boardVersionRef.current;
+        if (ready.has('teams') && changed && version !== localEditRef.current) {
+          updateHistory(emptyHistory());
+          setNotice('The shared board was updated in another session. Undo history has been reset.');
+        }
+        boardRef.current = next; boardVersionRef.current = version; setBoard(next); mark('teams');
+      } }, failed),
+      onSnapshot(collection(db, 'guilds', guildId, 'savedTeams'), snap => { if (active) { setSavedTeams(snap.docs.map(item => ({ ...item.data(), id: item.id, ...normalizeBoard(item.data().teams) })).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))); mark('saved'); } }, failed),
+    ];
+    return () => { active = false; unsubscribers.forEach(unsubscribe => unsubscribe()); };
+  }, [guildId]);
   useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-members', JSON.stringify(members)); }, [members]);
   useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-saved-teams', JSON.stringify(savedTeams)); }, [savedTeams]);
-  useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-teams', JSON.stringify(teams)); else setDoc(doc(db, 'guilds', 'default'), { teams, updatedAt: new Date().toISOString() }); }, [teams]);
-  useEffect(() => { if (!firebaseEnabled) return; return onSnapshot(doc(db, 'guilds', 'default'), snap => { if (snap.exists()?.teams) setTeams(normalizeTeams(snap.data().teams)); }); }, []);
-  useEffect(() => { if (!firebaseEnabled) return; return onSnapshot(collection(db, 'savedTeams'), snap => setSavedTeams(snap.docs.map(item => ({ id: item.id, ...item.data() })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))))); }, []);
-  const importMembers = async roster => { const seen = new Set(); const unique = roster.filter(member => { const key = member.ign.toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; }).map(member => ({ ...member, id: crypto.randomUUID() }));
-    if (firebaseEnabled) { const current = await getDocs(collection(db, 'members')); const batch = writeBatch(db); current.docs.forEach(item => batch.delete(item.ref)); unique.forEach(member => batch.set(doc(db, 'members', member.id), member)); await batch.commit(); } else setMembers(unique); setTeams(blankTeams()); return { added: unique.length, duplicates: roster.length - unique.length }; };
-  const deleteMember = async id => { if (firebaseEnabled) await deleteDoc(doc(db, 'members', id)); else setMembers(current => current.filter(member => member.id !== id)); setTeams(current => Object.fromEntries(Object.entries(current).map(([key, parties]) => [key, parties.map(slots => slots.map(item => item === id ? null : item))]))); };
-  const saveTeams = next => setTeams(next);
-  const autoBalance = () => { const sorted = [...members].sort((a, b) => b.gearScore - a.gearScore); const groups = { tank: sorted.filter(m => /knight|tank/i.test(m.className)), healer: sorted.filter(m => /priest|healer|support/i.test(m.className)), dps: sorted.filter(m => !/knight|tank|priest|healer|support/i.test(m.className)) }; const selected = [];
-    const bestRemaining = () => Object.values(groups).flat().sort((a, b) => b.gearScore - a.gearScore)[0]; const take = role => { const member = groups[role].shift() || bestRemaining(); if (!member) return; Object.values(groups).forEach(group => { const index = group.findIndex(item => item.id === member.id); if (index >= 0) group.splice(index, 1); }); selected.push(member); };
-    for (let party = 0; party < 12 && selected.length < 60; party += 1) ['tank', 'healer', 'dps', 'dps', 'dps'].forEach(take); const next = autoBalanceTeams(); selected.slice(0, 60).forEach((member, index) => { const lane = ['top','middle','bottom','flex'][Math.floor(index / 5) % 4]; const partyIndex = Math.floor(index / 20); next[lane][partyIndex][index % 5] = member.id; }); setTeams(next); };
-  // Clear recreates the clean, lane-only battlefield; roster records remain untouched.
-  const clearTeams = () => setTeams(blankTeams());
-  const saveTeam = async () => { const name = window.prompt('Enter a name for this team setup:'); if (!name?.trim()) return; const snapshot = { id: crypto.randomUUID(), name: name.trim(), createdAt: new Date().toISOString(), teams }; if (firebaseEnabled) await setDoc(doc(db, 'savedTeams', snapshot.id), snapshot); else setSavedTeams(current => [snapshot, ...current]); };
-  const loadTeam = snapshot => setTeams(normalizeTeams(snapshot.teams));
-  const deleteSavedTeam = async id => { if (firebaseEnabled) await deleteDoc(doc(db, 'savedTeams', id)); else setSavedTeams(current => current.filter(snapshot => snapshot.id !== id)); };
-  const active = page === 'dashboard' ? <Dashboard members={members} teams={teams} onImport={importMembers} role={role} /> : page === 'members' ? <Members members={members} onDelete={deleteMember} canDelete={role === 'Guild Master'} /> : <Teams members={members} teams={teams} onTeamsChange={saveTeams} editable={role !== 'Member'} generate={autoBalance} clear={clearTeams} save={saveTeam} savedTeams={savedTeams} load={loadTeam} deleteSaved={deleteSavedTeam} />;
-  const login = () => signInWithPopup(auth, new GoogleAuthProvider());
-  const logout = () => firebaseEnabled && signOut(auth);
-  return <><Navbar page={page} setPage={setPage} role={role} setRole={setRole} memberCount={members.length} user={user} firebaseEnabled={firebaseEnabled} onLogin={login} onLogout={logout} /><div className="app-shell">{active}</div></>;
+  useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-teams', JSON.stringify(board)); }, [board]);
+  const importMembers = async roster => {
+    if (role !== 'Guild Master') throw Object.assign(new Error(), { code: 'permission-denied' });
+    if (operationRef.current) throw Object.assign(new Error(), { code: 'import/busy' });
+    operationRef.current = true; setBusy(true);
+    try {
+      let result;
+      if (firebaseEnabled) result = await replaceGuildRoster(db, guildId, roster);
+      else {
+        const prepared = prepareRosterImport(roster, members);
+        setSavedTeams(current => current.map(snapshot => ({ ...snapshot, memberNames: formationMemberNames(snapshot.teams, members, snapshot.memberNames) })));
+        setMembers(prepared.members); const cleared = blankBoard(board.mode); boardRef.current = cleared; setBoard(cleared);
+        result = { added: prepared.members.length, duplicates: prepared.duplicates };
+      }
+      updateHistory(emptyHistory()); setError(''); setNotice(''); return result;
+    } finally { operationRef.current = false; setBusy(false); }
+  };
+  const reportFailure = () => setError('Your change could not be saved. Check your connection and try again.');
+  const saveTeams = async (next, action = 'edit') => {
+    if (role === 'Member' || operationRef.current) return false;
+    const before = normalizeBoard(boardRef.current);
+    const updated = normalizeBoard(typeof next === 'function' ? next(before) : next);
+    const validationError = boardError(updated);
+    if (validationError) { setError(validationError); return false; }
+    if (JSON.stringify(before) === JSON.stringify(updated)) return true;
+    const previousHistory = historyRef.current;
+    const expectedVersion = boardVersionRef.current;
+    const editId = crypto.randomUUID();
+    localEditRef.current = editId;
+    operationRef.current = true; setBusy(true); setNotice('');
+    try {
+      if (firebaseEnabled) await runTransaction(db, async transaction => {
+        const ref = doc(db, 'guilds', guildId);
+        const saved = await transaction.get(ref);
+        if (!saved.exists() || (saved.data().boardEditId || null) !== expectedVersion || JSON.stringify(normalizeBoard(saved.data().teams)) !== JSON.stringify(before)) throw Object.assign(new Error('Board changed'), { code: 'formation/conflict' });
+        transaction.update(ref, { teams: serializeBoard(updated), boardEditId: editId, updatedAt: serverTimestamp() });
+      });
+      if (!firebaseEnabled || boardVersionRef.current === expectedVersion || boardVersionRef.current === editId) {
+        boardRef.current = updated; boardVersionRef.current = editId; setBoard(updated);
+        updateHistory(advanceHistory(previousHistory, before, updated, action));
+      }
+      setError(''); return true;
+    } catch (failure) {
+      if (failure.code === 'formation/conflict') { updateHistory(emptyHistory()); setError('Another session changed the board. Your change was not applied. Review the current board and try again.'); }
+      else reportFailure();
+      return false;
+    } finally { operationRef.current = false; setBusy(false); }
+  };
+  const deleteMember = async id => {
+    if (role !== 'Guild Master' || operationRef.current) return;
+    const next = Object.fromEntries(Object.entries(teams).map(([key, parties]) => [key, parties.map(slots => slots.map(item => item === id ? null : item))]));
+    if (!firebaseEnabled) { setMembers(current => current.filter(member => member.id !== id)); const cleaned = { ...boardRef.current, teams: next }; boardRef.current = cleaned; setBoard(cleaned); updateHistory(emptyHistory()); return; }
+    operationRef.current = true; setBusy(true);
+    try {
+      await runTransaction(db, async transaction => {
+        const guildRef = doc(db, 'guilds', guildId);
+        const saved = await transaction.get(guildRef);
+        const current = normalizeBoard(saved.data().teams);
+        const cleaned = Object.fromEntries(Object.entries(current.teams).map(([lane, parties]) => [lane, parties.map(slots => slots.map(item => item === id ? null : item))]));
+        transaction.delete(doc(db, 'guilds', guildId, 'members', id));
+        transaction.update(guildRef, { teams: serializeBoard({ ...current, teams: cleaned }), boardEditId: crypto.randomUUID(), updatedAt: serverTimestamp() });
+      });
+      updateHistory(emptyHistory()); setError('');
+    } catch { reportFailure(); }
+    finally { operationRef.current = false; setBusy(false); }
+  };
+  const autoBalance = async (status = 'all', preferences = null) => {
+    const before = Object.values(boardRef.current.teams).flat(2).filter(Boolean).length;
+    const next = autoBalanceBoard(members, boardRef.current, status, preferences);
+    const success = await saveTeams(next);
+    if (success) {
+      const filled = Object.values(next.teams).flat(2).filter(Boolean).length - before;
+      const unfilled = Object.values(next.teams).flat(2).filter(id => !id).length;
+      setNotice(`Filled ${filled} empty slot(s) using the highest-GS matching members.${unfilled ? ` ${unfilled} slot(s) remain empty because no matching available member was found.` : ''}`);
+    }
+    return success;
+  };
+  const clearTeams = () => saveTeams(blankBoard(boardRef.current.mode));
+  const selectMode = mode => {
+    if (mode === boardRef.current.mode) return;
+    const next = changeBoardMode(boardRef.current, mode);
+    const removedTeams = Object.values(boardRef.current.teams).flat().length - Object.values(next.teams).flat().length;
+    if (removedTeams > 0 && !window.confirm(`Switch to ${BOARD_MODES[mode].name}? ${removedTeams} excess ${removedTeams === 1 ? 'party' : 'parties'} will be removed and their players returned to Available Members. You can undo this change.`)) return;
+    saveTeams(next);
+  };
+  const saveTeam = async (name, targetId = null) => {
+    if (role === 'Member' || operationRef.current || !name.trim() || name.trim().length > 80) return false;
+    const incomplete = formationSaveError(boardRef.current, members);
+    if (incomplete) { setError(incomplete); return false; }
+    const existing = targetId ? savedTeams.find(item => item.id === targetId) : null;
+    if (targetId && !existing) return false;
+    const snapshot = { id: targetId || crypto.randomUUID(), name: name.trim(), createdAt: existing?.createdAt || new Date().toISOString(), ...normalizeBoard(boardRef.current), memberNames: formationMemberNames(boardRef.current.teams, members) };
+    operationRef.current = true; setBusy(true); setNotice('');
+    try {
+      if (firebaseEnabled) {
+        const ref = doc(db, 'guilds', guildId, 'savedTeams', snapshot.id);
+        if (targetId) await runTransaction(db, async transaction => {
+          const current = await transaction.get(ref);
+          if (!current.exists()) throw new Error('Save slot no longer exists');
+          transaction.update(ref, { name: snapshot.name, teams: serializeBoard(snapshot), memberNames: snapshot.memberNames, updatedAt: new Date().toISOString() });
+        });
+        else await setDoc(ref, { ...snapshot, ownerId: guild.ownerId, createdBy: user.uid, teams: serializeBoard(snapshot) });
+      } else setSavedTeams(current => targetId ? current.map(item => item.id === targetId ? snapshot : item) : [snapshot, ...current]);
+      setActiveSaveId(snapshot.id);
+      setError(''); setNotice(`${targetId ? 'Updated' : 'Saved'} formation "${snapshot.name}" in your guild playbook.`); return true;
+    } catch { reportFailure(); return false; }
+    finally { operationRef.current = false; setBusy(false); }
+  };
+  const loadTeam = async snapshot => {
+    const saved = normalizeBoard(snapshot);
+    const prepared = prepareFormation(saved.teams, members, saved.groupNames, saved.teamNames, snapshot.memberNames);
+    const success = await saveTeams({ ...saved, teams: prepared.teams });
+    if (success) setActiveSaveId(snapshot.id);
+    if (success) setNotice([
+      `Loaded "${snapshot.name}".`,
+      ...(prepared.missing ? ['Members no longer in the current roster were removed from these slots:'] : []),
+      ...prepared.missingParties.map(({ team, party, count }) => `${team} / ${party} is missing ${count} ${count === 1 ? 'member' : 'members'}. Fill the empty ${count === 1 ? 'slot' : 'slots'} with replacements.`),
+      ...prepared.removedMembers.map(({ team, party, slot, name }) => `${team} / ${party}, slot ${slot}: ${name ? `Removed ${name}` : 'Removed member (name unavailable in this older save)'} - no longer in the roster.`),
+      ...(prepared.duplicates ? [`${prepared.duplicates} duplicate assignment(s) were cleared.`] : []),
+    ].join('\n'));
+    return success;
+  };
+  const deleteSavedTeam = async id => {
+    if (role === 'Member' || operationRef.current) return false;
+    operationRef.current = true; setBusy(true); setNotice('');
+    try { if (firebaseEnabled) await deleteDoc(doc(db, 'guilds', guildId, 'savedTeams', id)); else setSavedTeams(current => current.filter(snapshot => snapshot.id !== id)); setError(''); setNotice('Saved formation deleted. The active board is unchanged.'); return true; } catch { reportFailure(); return false; }
+    finally { operationRef.current = false; setBusy(false); }
+  };
+  const undo = () => { const previous = historyRef.current.past.at(-1); if (previous) saveTeams(previous, 'undo'); };
+  const redo = () => { const next = historyRef.current.future.at(-1); if (next) saveTeams(next, 'redo'); };
+  const active = page === 'dashboard' ? <Dashboard canManageTokens={!user?.isAnonymous} guildName={guild?.name || 'Local demo'} guildId={guildId} ownerId={guild?.ownerId} tokenExpiresAt={guild?.tokenExpiresAt} members={members} teams={teams} onImport={importMembers} role={role} /> : page === 'members' ? <Members members={members} onDelete={deleteMember} canDelete={role === 'Guild Master'} /> : <Teams guildName={guild?.name || 'Local demo'} members={members} teams={teams} mode={board.mode} teamNames={board.teamNames} groupNames={board.groupNames} selectMode={selectMode} onTeamsChange={saveTeams} editable={role !== 'Member'} generate={autoBalance} clear={clearTeams} save={saveTeam} activeSaveId={activeSaveId} savedTeams={savedTeams} load={loadTeam} deleteSaved={deleteSavedTeam} busy={busy} notice={notice} undo={undo} redo={redo} canUndo={history.past.length > 0} canRedo={history.future.length > 0} />;
+  const logout = async () => { try { if (firebaseEnabled) await signOut(auth); else exitDemo(); } catch { setError('Could not sign out. Please try again.'); } };
+  return <><Navbar page={page} setPage={setPage} role={role} memberCount={members.length} user={user} guild={guild} onLogout={logout} /><div className="app-shell">{!firebaseEnabled && <p className="demo-banner">Local demo — data stays in this browser. No online account is created.</p>}{error && <p className="workspace-error" role="alert">{error}</p>}{loaded ? active : <p className="workspace-loading" role="status">Loading your guild…</p>}</div></>;
 }
+

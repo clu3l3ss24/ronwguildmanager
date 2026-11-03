@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function leaderAccount() { return signedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous'; }
+    function memberAccount() { return signedIn() && request.auth.token.firebase.sign_in_provider == 'anonymous'; }
+    function ownsGuild(guildId) {
+      return leaderAccount() && get(/databases/$(database)/documents/guilds/$(guildId)).data.ownerId == request.auth.uid;
+    }
+    function memberAccess(guildId) {
+      let session = get(/databases/$(database)/documents/memberSessions/$(request.auth.uid)).data;
+      let token = get(/databases/$(database)/documents/memberTokens/$(session.tokenHash)).data;
+      return session.guildId == guildId && token.guildId == guildId && token.expiresAt > request.time;
+    }
+    function canManageGuild(guildId) {
+      return ownsGuild(guildId) || (memberAccount() && memberAccess(guildId));
+    }
+    function validSession(data) {
+      let token = get(/databases/$(database)/documents/memberTokens/$(data.tokenHash)).data;
+      return data.keys().hasOnly(['guildId', 'tokenHash', 'joinedAt'])
+        && data.guildId is string && data.tokenHash.matches('^[a-f0-9]{64}$')
+        && data.joinedAt == request.time
+        && token.guildId == data.guildId && token.expiresAt > request.time;
+    }
+    match /memberTokens/{tokenHash} {
+      // Possession of a high-entropy token digest permits lookup, never enumeration.
+      allow get: if signedIn();
+      allow list: if ownsGuild(resource.data.guildId);
+      allow create: if tokenHash.matches('^[a-f0-9]{64}$')
+        && ownsGuild(request.resource.data.guildId)
+        && request.resource.data.keys().hasOnly(['guildId', 'ownerId', 'name', 'createdAt', 'expiresAt'])
+        && request.resource.data.ownerId == get(/databases/$(database)/documents/guilds/$(request.resource.data.guildId)).data.ownerId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(31, 'd');
+      allow delete: if ownsGuild(resource.data.guildId);
+      allow update: if false;
+    }
+    match /memberSessions/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create, update: if memberAccount() && request.auth.uid == uid && validSession(request.resource.data);
+      allow delete: if memberAccount() && request.auth.uid == uid;
+      allow list: if false;
+    }
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create: if leaderAccount() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['guildId', 'displayName', 'createdAt'])
+        && request.resource.data.guildId == uid
+        && request.resource.data.displayName is string
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/guilds/$(uid)).data.ownerId == uid;
+      // No client-side membership reassignment or privilege changes.
+      allow list, update, delete: if false;
+    }
+    match /guilds/{guildId} {
+      allow get: if canManageGuild(guildId);
+      allow create: if leaderAccount() && guildId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['name', 'ownerId', 'createdAt', 'teams'])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 80
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.teams is map
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.guildId == guildId;
+      allow update: if canManageGuild(guildId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teams', 'boardEditId', 'updatedAt'])
+        && request.resource.data.teams is map
+        && request.resource.data.updatedAt == request.time;
+      allow list, delete: if false;
+      match /members/{memberId} {
+        allow read, write: if canManageGuild(guildId);
+      }
+      match /tokenSecrets/{tokenHash} {
+        allow read, delete: if ownsGuild(guildId);
+        allow create: if ownsGuild(guildId)
+          && tokenHash.matches('^[a-f0-9]{64}$')
+          && request.resource.data.keys().hasOnly(['token'])
+          && request.resource.data.token is string
+          && request.resource.data.token.matches('^RONW-[a-f0-9]{64}$')
+          && getAfter(/databases/$(database)/documents/memberTokens/$(tokenHash)).data.guildId == guildId;
+        allow update: if false;
+      }
+      match /savedTeams/{formationId} {
+        allow read, delete: if canManageGuild(guildId);
+        allow create, update: if canManageGuild(guildId)
+          && request.resource.data.ownerId == get(/databases/$(database)/documents/guilds/$(guildId)).data.ownerId;
+      }
+    }
+    // Legacy global collections and all other paths are inaccessible.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

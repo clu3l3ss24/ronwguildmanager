@@ -1,9 +1,11 @@
 {
-  "name": "row-guild-manager",
+  "name": "ronw-guild-manager",
   "version": "1.0.0",
   "description": "Ragnarok: The New World guild roster and team planner",
   "type": "module",
   "scripts": {
+    "test": "node --test src/firebase/teams.test.js src/firebase/memberTokens.test.js src/firebase/board.test.js",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-ronw-tests \"node --test tests/firestore.rules.test.js\"",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
@@ -17,7 +19,9 @@
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
     "@vitejs/plugin-react": "^5.0.0",
+    "firebase-tools": "^15.34.2",
     "vite": "^7.1.3"
   },
   "private": true
