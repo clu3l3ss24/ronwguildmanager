@@ -12,8 +12,19 @@ service cloud.firestore {
       let token = get(/databases/$(database)/documents/memberTokens/$(session.tokenHash)).data;
       return session.guildId == guildId && token.guildId == guildId && token.expiresAt > request.time;
     }
-    function canManageGuild(guildId) {
+    function canReadGuild(guildId) {
       return ownsGuild(guildId) || (memberAccount() && memberAccess(guildId));
+    }
+    function tokenCanEdit(guildId) {
+      let session = get(/databases/$(database)/documents/memberSessions/$(request.auth.uid)).data;
+      let token = get(/databases/$(database)/documents/memberTokens/$(session.tokenHash)).data;
+      let workspace = get(/databases/$(database)/documents/guilds/$(guildId)).data;
+      return token.get('permission', workspace.get('sharedReadOnly', false) ? 'view' : 'edit') == 'edit';
+    }
+    function canManageGuild(guildId) {
+      return (ownsGuild(guildId) || (memberAccount() && memberAccess(guildId)
+        && tokenCanEdit(guildId)))
+        && get(/databases/$(database)/documents/guilds/$(guildId)).data.get('deletionPending', false) == false;
     }
     function validSession(data) {
       let token = get(/databases/$(database)/documents/memberTokens/$(data.tokenHash)).data;
@@ -28,8 +39,10 @@ service cloud.firestore {
       allow list: if ownsGuild(resource.data.guildId);
       allow create: if tokenHash.matches('^[a-f0-9]{64}$')
         && ownsGuild(request.resource.data.guildId)
-        && request.resource.data.keys().hasOnly(['guildId', 'ownerId', 'name', 'createdAt', 'expiresAt'])
+        && get(/databases/$(database)/documents/guilds/$(request.resource.data.guildId)).data.get('deletionPending', false) == false
+        && request.resource.data.keys().hasOnly(['guildId', 'ownerId', 'name', 'createdAt', 'expiresAt', 'permission'])
         && request.resource.data.ownerId == get(/databases/$(database)/documents/guilds/$(request.resource.data.guildId)).data.ownerId
+        && request.resource.data.get('permission', 'edit') in ['edit', 'view']
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
         && request.resource.data.createdAt == request.time
@@ -37,7 +50,10 @@ service cloud.firestore {
         && request.resource.data.expiresAt > request.time
         && request.resource.data.expiresAt <= request.time + duration.value(31, 'd');
       allow delete: if ownsGuild(resource.data.guildId);
-      allow update: if false;
+      allow update: if ownsGuild(resource.data.guildId)
+        && get(/databases/$(database)/documents/guilds/$(resource.data.guildId)).data.get('deletionPending', false) == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['permission'])
+        && request.resource.data.permission in ['edit', 'view'];
     }
     match /memberSessions/{uid} {
       allow get: if signedIn() && request.auth.uid == uid;
@@ -54,10 +70,14 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && getAfter(/databases/$(database)/documents/guilds/$(uid)).data.ownerId == uid;
       // No client-side membership reassignment or privilege changes.
-      allow list, update, delete: if false;
+      allow update: if leaderAccount() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0 && request.resource.data.displayName.size() <= 80;
+      allow list, delete: if false;
     }
     match /guilds/{guildId} {
-      allow get: if canManageGuild(guildId);
+      allow get: if canReadGuild(guildId);
       allow create: if leaderAccount() && guildId == request.auth.uid
         && request.resource.data.keys().hasOnly(['name', 'ownerId', 'createdAt', 'teams'])
         && request.resource.data.ownerId == request.auth.uid
@@ -66,13 +86,20 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.teams is map
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.guildId == guildId;
+      allow update: if ownsGuild(guildId)
+        && resource.data.get('deletionPending', false) == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'sharedReadOnly', 'updatedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 80
+        && request.resource.data.get('sharedReadOnly', false) is bool
+        && request.resource.data.updatedAt == request.time;
       allow update: if canManageGuild(guildId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teams', 'boardEditId', 'updatedAt'])
         && request.resource.data.teams is map
         && request.resource.data.updatedAt == request.time;
       allow list, delete: if false;
       match /members/{memberId} {
-        allow read, write: if canManageGuild(guildId);
+        allow read: if canReadGuild(guildId);
+        allow write: if canManageGuild(guildId);
       }
       match /tokenSecrets/{tokenHash} {
         allow read, delete: if ownsGuild(guildId);
@@ -85,7 +112,8 @@ service cloud.firestore {
         allow update: if false;
       }
       match /savedTeams/{formationId} {
-        allow read, delete: if canManageGuild(guildId);
+        allow read: if canReadGuild(guildId);
+        allow delete: if canManageGuild(guildId);
         allow create, update: if canManageGuild(guildId)
           && request.resource.data.ownerId == get(/databases/$(database)/documents/guilds/$(guildId)).data.ownerId;
       }

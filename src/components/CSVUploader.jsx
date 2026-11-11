@@ -31,9 +31,9 @@ export default function CSVUploader({ onImport, canUpload }) {
     if (errors.length) console.warn('CSV parsing warnings:', errors);
     }}); } catch (error) { fail(error); }
   };
-  if (!canUpload) return <section className="upload-panel locked"><span>CSV uploads are restricted to Guild Masters.</span></section>;
+  if (!canUpload) return <section className="upload-panel locked"><span>Roster imports are available to the workspace owner.</span></section>;
   return <section className="upload-panel">
-    <div><p className="eyebrow">ROSTER SYNC</p><h2>Import guild roster</h2><p>Upload a CSV export to replace the roster and reset the active Team Builder.</p></div>
+    <div><p className="eyebrow">ROSTER SYNC</p><h2>Import roster</h2><p>Upload a CSV export to replace the roster and reset the active Team Builder.</p></div>
     <button className="primary-button" disabled={busy} onClick={() => input.current.click()}>{busy ? 'Importing…' : 'Upload CSV'}</button>
     <input ref={input} type="file" accept=".csv,text/csv" hidden disabled={busy} onChange={event => { const file = event.target.files[0]; event.target.value = ''; if (file) importFile(file); }} />
     {message && <p className={`import-message${failed ? ' import-error' : ''}`} role={failed ? 'alert' : 'status'}>{message}</p>}

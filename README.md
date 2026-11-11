@@ -22,7 +22,7 @@ Without Firebase configured, account creation is disabled and **Explore local de
 
 ## Accounts and separate guilds
 
-The initial screen opens to account sign-in, with a **Sign up** link below and a **Member token** option. Leaders create an account using email and password, then name their guild. Returning leaders sign in to their existing guild. Users can request a password reset link. This phase supports one guild per leader and token sessions with full guild-management access for members; individual member profiles and officer roles are not implemented yet.
+The initial screen opens to account sign-in, with a **Sign up** link below and a **Member token** option. Players create an account using email and password, then optionally name their workspace. Returning users sign in to their existing workspace. Users can request a password reset link. This phase supports one guild per account and token sessions with editing access by default, or view-only access when enabled in Settings; individual member profiles and officer roles are not implemented yet.
 
 - **Firebase Authentication** stores account credentials and assigns a stable user ID. Passwords are passed directly to Firebase Authentication; the app does not write them to Firestore or local storage.
 - **Cloud Firestore** stores the user's profile and their guild data:
@@ -40,7 +40,7 @@ The guild ID currently equals its leader's Firebase user ID. The profile and gui
 
 ### Member login tokens
 
-On the **Command** page, only account-based guild leaders can view, create, copy, or revoke member login tokens. Tokens expire after 1, 7, or 30 days. Each list row has **Copy token** for retrieving a token again. Older hash-only tokens cannot be recovered: create a replacement and revoke the old token.
+On the **Overview** page, only account-based account owners can view, create, copy, or revoke member login tokens. Tokens expire after 1, 7, or 30 days. Each list row has **Copy token** for retrieving a token again. Older hash-only tokens cannot be recovered: create a replacement and revoke the old token.
 
 Login continues to use a SHA-256 digest. Recoverable copies of new tokens are stored separately at `guilds/{guildId}/tokenSecrets/{digest}`, protected by owner-only Firestore rules; they are never included in the token login lookup. Token sessions retain roster and formation access but cannot list tokens or read their recoverable values, create tokens, or revoke tokens. Expiry and revocation still apply. Publish the updated `firestore.rules` before using this feature. Do not put tokens in URLs or browser storage.
 
@@ -74,7 +74,7 @@ Deploy the current `firestore.rules` when upgrading; shared board updates now in
 
 **Auto-balance teams** opens a five-slot party preference window. Every slot defaults to **Any**, selecting the highest-GS available player across all roles. Select Tank, Healer, or DPS to restrict a slot, then optionally select a specific job within that role. The template applies to the corresponding empty slots in every existing party. Specific jobs are filled first, then role-only slots, then Any slots; each uses highest matching gear score and the roster status filter. Assigned players remain in place, players are never duplicated, and unmatched slots stay empty. Confirm with **Fill empty slots** or cancel without changes. Preferences reset to Any each time the window opens; Undo can restore the board after filling.
 
-Team Builder defaults to **Compact view**, with smaller job icons and player cards. Toggle it beside the assigned-player count; the preference is remembered in this browser.
+Team Builder uses compact one-line player cards. Click a team-name tab to switch teams; new teams open automatically. Double-click a team tab (or press F2) to rename it; Enter saves and Escape cancels. Screenshot team, Add party, and Remove team sit in the Battle mode row and apply to the selected team. Each team supports eight vertical parties, arranged four per row.
 
 Member cards use a status dot with a tooltip instead of Online/Offline text and have tighter spacing. **Save formation** and **Load formation** stay in the sticky Team Builder header alongside Undo, Redo, Auto-balance, and Clear All, so they remain accessible while scrolling.
 
@@ -107,3 +107,13 @@ If an upload reports **permission-denied**, publish the latest local `firestore.
 Roster replacement and resetting the active board are committed atomically: if Firebase rejects the import, the existing roster and board are preserved. Retained players are updated in place, preserving IDs used by saved formations.
 
 The importer supports both the requested names (`Player Name / IGN`, `Level`, `Guild Position`) and the supplied guild-export names (`Player`, `Lv.`, `Position`). It validates an IGN, ignores blank rows, and skips duplicate IGNs.
+
+## Personal workspaces and Settings
+
+The app is for any player, with optional guild naming. Existing `guilds/{uid}` paths remain unchanged for compatibility. Settings provides email and verification, display name, workspace name, reauthenticated password changes, browser theme, JSON export, and account deletion. Overview contains shared-access tokens and a per-token Edit / View selector. Each token has an Edit / View selector beside Copy token and Revoke on Overview. Permission changes apply to active sessions. Older tokens without a permission retain their previous workspace setting until explicitly changed. JSON export excludes tokens and credentials; JSON restoration is not implemented.
+
+Deploy the updated Firestore rules alongside the frontend. To enable account deletion on Vercel, add **FIREBASE_SERVICE_ACCOUNT_JSON** as a server-only environment variable containing a Firebase Admin service-account JSON for the same project, then redeploy. Never prefix this secret with `VITE_`, commit it, or expose it in browser code. `/api/delete-account` verifies a recently reauthenticated password account, derives the workspace ID from its verified UID, revokes tokens and sessions, recursively removes the workspace, and deletes the Auth user and profile. Local Vite does not serve Vercel API routes; test deletion via Vercel development or a preview deployment with a dedicated test Firebase project. A failed deletion can partially remove data; the UI reports this and allows retry. Large workspaces may require a longer Vercel function duration or a queued backend deletion job.
+
+### Viewport layout
+
+The workspace fills the browser window and keeps navigation visible. Long pages scroll inside the content area. On desktop, the Team Builder board and roster scroll independently; narrow windows stack the panels, and short windows allow the builder page to scroll so its controls remain reachable. Browser zoom remains supported and can trigger responsive layout changes; it is not disabled or counteracted with automatic scaling.

@@ -1,4 +1,7 @@
 node_modules
+.npm-cache
+.local-config
+.firebase-emulators
 dist
 .env
 .env.local

@@ -177,3 +177,54 @@ test('outdated board rules reject the import atomically with an actionable error
     if (!original.exists() || (await getDocs(collection(db, 'guilds', 'leader-a', 'members'))).size !== 1 || guild.data().teams.top[0].slots[0] !== 'old-player') throw new Error('Denied import changed existing data');
   } finally { await oldEnv.cleanup(); }
 });
+
+test('workspace settings are owner-only and view-only blocks shared writes', async () => {
+  const owner = leader('leader-a'); const viewer = member('viewer');
+  await assertSucceeds(setDoc(doc(viewer, 'memberSessions', 'viewer'), session()));
+  await assertSucceeds(updateDoc(doc(owner, 'guilds', 'leader-a'), { name: 'Personal roster', sharedReadOnly: true, updatedAt: serverTimestamp() }));
+  await assertSucceeds(getDocs(collection(viewer, 'guilds', 'leader-a', 'members')));
+  await assertFails(updateDoc(doc(viewer, 'guilds', 'leader-a'), { teams: {}, updatedAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(viewer, 'guilds', 'leader-a', 'members', 'new'), { ign: 'Denied' }));
+  await assertFails(deleteDoc(doc(viewer, 'guilds', 'leader-a', 'savedTeams', 'formation')));
+  await assertFails(updateDoc(doc(viewer, 'guilds', 'leader-a'), { sharedReadOnly: false, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(leader('leader-b'), 'guilds', 'leader-a'), { name: 'Denied', updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(owner, 'guilds', 'leader-a'), { name: '', updatedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(doc(owner, 'guilds', 'leader-a'), { sharedReadOnly: false, updatedAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(doc(viewer, 'guilds', 'leader-a', 'members', 'new'), { ign: 'Allowed' }));
+});
+
+test('profile display name changes cannot reassign membership', async () => {
+  await env.withSecurityRulesDisabled(async context => setDoc(doc(context.firestore(), 'users', 'leader-a'), { guildId: 'leader-a', displayName: 'Player', createdAt: Timestamp.now() }));
+  const owner = leader('leader-a');
+  await assertSucceeds(updateDoc(doc(owner, 'users', 'leader-a'), { displayName: 'New name' }));
+  await assertFails(updateDoc(doc(owner, 'users', 'leader-a'), { guildId: 'leader-b' }));
+  await assertFails(updateDoc(doc(leader('leader-b'), 'users', 'leader-a'), { displayName: 'Denied' }));
+});
+
+test('deletion in progress blocks edits and new access tokens', async () => {
+  await env.withSecurityRulesDisabled(async context => updateDoc(doc(context.firestore(), 'guilds', 'leader-a'), { deletionPending: true }));
+  const owner = leader('leader-a');
+  await assertFails(updateDoc(doc(owner, 'guilds', 'leader-a'), { teams: {}, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(owner, 'guilds', 'leader-a'), { name: 'Changed', updatedAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(owner, 'memberTokens', 'c'.repeat(64)), token()));
+  await assertFails(setDoc(doc(owner, 'guilds', 'leader-a', 'members', 'new'), { ign: 'New' }));
+});
+
+test('permissions apply per token and only owners can change them', async () => {
+  const owner = leader('leader-a'); const viewer = member('viewer'); const editor = member('editor'); const editHash = 'c'.repeat(64);
+  await assertSucceeds(updateDoc(doc(owner, 'memberTokens', hashA), { permission: 'view' }));
+  await assertSucceeds(setDoc(doc(owner, 'memberTokens', editHash), { ...token(), permission: 'edit' }));
+  await assertSucceeds(setDoc(doc(viewer, 'memberSessions', 'viewer'), session()));
+  await assertSucceeds(setDoc(doc(editor, 'memberSessions', 'editor'), session('leader-a', editHash)));
+  await assertSucceeds(getDocs(collection(viewer, 'guilds', 'leader-a', 'members')));
+  await assertFails(updateDoc(doc(viewer, 'guilds', 'leader-a'), { teams: {}, updatedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(doc(editor, 'guilds', 'leader-a'), { teams: {}, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(viewer, 'memberTokens', hashA), { permission: 'edit' }));
+  await assertFails(updateDoc(doc(leader('leader-b'), 'memberTokens', hashA), { permission: 'edit' }));
+  await assertFails(updateDoc(doc(owner, 'memberTokens', hashA), { permission: 'admin' }));
+  await assertFails(updateDoc(doc(owner, 'memberTokens', hashA), { permission: 'edit', guildId: 'leader-b' }));
+  await assertSucceeds(updateDoc(doc(owner, 'memberTokens', hashA), { permission: 'edit' }));
+  await assertSucceeds(updateDoc(doc(viewer, 'guilds', 'leader-a'), { teams: {}, updatedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(doc(owner, 'memberTokens', editHash), { permission: 'view' }));
+  await assertFails(deleteDoc(doc(editor, 'guilds', 'leader-a', 'members', 'player')));
+});

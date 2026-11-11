@@ -1,0 +1,73 @@
+﻿/* The workspace fills the browser viewport; content owns its scrolling. */
+.workspace-frame{height:100dvh;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.workspace-frame>.navbar,.workspace-frame>.mobile-account{flex-shrink:0}
+.workspace-frame>.navbar{position:relative;top:auto;padding-inline:clamp(12px,2vw,32px);gap:clamp(12px,2vw,32px)}
+.workspace-frame .app-shell{width:100%;max-width:none;min-height:0;flex:1;display:flex;flex-direction:column;overflow:hidden;padding:16px clamp(12px,2vw,32px)}
+.workspace-frame .app-shell>.demo-banner,.workspace-frame .app-shell>.workspace-error{flex-shrink:0;margin:0 0 12px}
+.workspace-frame .app-shell>.page{width:100%;max-width:none;min-height:0;flex:1;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:8px}
+.workspace-frame .page-title{padding:16px 0 20px}
+.workspace-frame .page-title h1{font-size:clamp(28px,2.6vw,42px)}
+.workspace-frame .settings-fields{max-width:1200px}
+.workspace-frame .navbar nav{min-width:0;flex-shrink:0}
+.workspace-frame .nav-end{min-width:0}
+.workspace-frame .roster-count{white-space:nowrap}
+.workspace-frame .app-shell>.team-builder-page{display:flex;flex-direction:column;overflow:hidden;padding-right:0;scrollbar-gutter:auto}
+.workspace-frame .team-builder-page>.team-builder-heading{position:static;top:auto;flex-shrink:0;margin-bottom:12px;padding:8px 0 14px;gap:12px}
+.workspace-frame .team-builder-heading>div:first-child{min-width:180px}
+.workspace-frame .team-builder-heading h1{font-size:30px;margin:4px 0 6px}
+.workspace-frame .team-builder-heading>div:first-child>p:not(.eyebrow){font-size:12px}
+.workspace-frame .team-actions{gap:6px}
+.workspace-frame .team-actions button{padding:8px 10px;font-size:12px}
+.workspace-frame .battle-mode{flex-shrink:0;padding:10px 14px;margin-bottom:12px;gap:16px}
+.workspace-frame .team-builder-page>.formation-notice,.workspace-frame .team-builder-page>.permission-note{flex-shrink:0;max-height:22dvh;overflow:auto;margin:0 0 10px}
+.workspace-frame .planner-layout{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,24%);align-items:stretch;gap:14px}
+.workspace-frame .builder-workspace,.workspace-frame .team-builder-page .member-sidebar{position:static;top:auto;min-height:0;max-height:none;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.workspace-frame .pool-drop{grid-template-columns:1fr}
+.workspace-frame .builder-heading{gap:12px}
+.workspace-frame .team-group,.workspace-frame .party-card{scroll-margin-top:16px}
+@media(max-width:1100px){.workspace-frame .roster-count{display:none}.workspace-frame .account-identity{max-width:130px}.workspace-frame .team-builder-heading{align-items:flex-start;flex-wrap:wrap}.workspace-frame .team-actions{justify-content:flex-start}}
+@media(max-width:850px){.workspace-frame .app-shell{padding:12px}.workspace-frame .mobile-account{padding:8px 12px}.workspace-frame .app-shell>.team-builder-page{display:block;overflow:auto;padding-right:6px;scrollbar-gutter:stable}.workspace-frame .planner-layout{grid-template-columns:minmax(0,1fr);gap:12px}.workspace-frame .builder-workspace{max-height:70dvh;min-height:300px}.workspace-frame .team-builder-page .member-sidebar{max-height:60dvh}.workspace-frame .battle-mode{flex-wrap:wrap}.workspace-frame .page-title.inline-title{flex-wrap:wrap;gap:12px}.workspace-frame .navbar nav{flex-shrink:1}}
+@media(max-height:650px) and (min-width:851px){.workspace-frame .app-shell>.team-builder-page{overflow:auto;display:block;scrollbar-gutter:stable}.workspace-frame .planner-layout{height:65dvh;min-height:260px}.workspace-frame .team-builder-heading{flex-wrap:wrap}.workspace-frame .page-title{padding-top:8px}}
+/* One-line player cards in the team builder and drag preview. */
+.member-card.compact.member-row,.workspace-frame .planner-layout .member-card.compact.member-row{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:8px;min-height:52px;height:52px;padding:9px 10px;width:100%;min-width:0}
+.member-row .member-row-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:1.2}
+.member-row .member-row-gs{flex:none;white-space:nowrap;font-size:11px;font-weight:600}
+.member-card.compact.member-row .job-icon{width:28px;height:28px;flex:0 0 28px;border-radius:4px}
+.member-card.compact.member-row .job-icon>span{transform:scale(.636364)}
+.workspace-frame .planner-layout .party-slots .team-slot{height:54px;min-height:54px}
+.workspace-frame .planner-layout .party-slots .team-slot>div{min-width:0;width:100%;height:100%}
+.workspace-frame .planner-layout .party-slots{grid-template-columns:minmax(0,1fr);overflow-x:visible;gap:8px;padding:8px}
+.workspace-frame .planner-layout .member-sidebar .pool-drop{gap:8px}
+.member-row-name,.member-row-gs{color:#eef1ff}html[data-theme=light] .member-row-name,html[data-theme=light] .member-row-gs{color:#20263b}
+.workspace-frame .planner-layout .member-row .status-dot,.member-row .status-dot{flex:0 0 8px;width:8px;height:8px;margin:0;align-self:center}
+/* Vertical five-player parties, with no more than four parties per row. */
+.workspace-frame .builder-workspace{container-type:inline-size;container-name:team-board}
+.workspace-frame .planner-layout .team-parties{display:grid;grid-template-columns:repeat(4,minmax(245px,1fr));gap:10px;align-items:start;overflow-x:auto;padding-bottom:6px}
+.workspace-frame .planner-layout .party-card{min-width:0}
+.workspace-frame .planner-layout .party-card>header{gap:6px;padding:8px;align-items:center}
+.workspace-frame .planner-layout .party-card>header>div{display:block;min-width:0;margin-right:0;flex:1}
+.workspace-frame .planner-layout .party-card .team-name-input{width:100%;min-width:0;margin:0 0 4px;font-size:12px}
+.workspace-frame .planner-layout .party-card>header small{display:block;font-size:10px;white-space:normal}
+.workspace-frame .planner-layout .party-card>header .remove-party{padding:5px 6px;font-size:10px;flex:none}
+.team-header-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px}.team-assigned-count{font-size:11px;color:#a7afd0;white-space:nowrap}.team-tabs{display:flex;gap:6px;overflow-x:auto;padding:12px 0;border-bottom:1px solid #303651}.team-tabs>button{display:flex;align-items:center;gap:10px;flex:none;max-width:260px;overflow-wrap:anywhere;border:1px solid #414b6c;border-radius:6px;background:#191f34;color:#bfc7e5;padding:9px 12px;font:600 13px 'DM Sans',sans-serif;text-align:left}.team-tabs>button[aria-selected=true]{border-color:#d4b363;background:#302b21;color:#f1d58c}.team-tabs>button>span{font-size:10px;color:#a7afd0;white-space:nowrap}.team-tabs>button:focus-visible{outline:2px solid #dfbd6d;outline-offset:-3px}.workspace-frame .planner-layout .team-group{padding-top:10px}.workspace-frame .planner-layout .team-group>header{margin-bottom:10px}.workspace-frame .planner-layout .team-group>header .team-name-input{margin:0 0 5px;font-size:13px;width:240px}.workspace-frame .add-team-form{padding:12px 0}.workspace-frame .add-team-form input{padding:8px 10px}.workspace-frame .add-team-form .primary-button{padding:9px 12px}.workspace-frame .builder-heading{flex-wrap:wrap}html[data-theme=light] .team-tabs>button{background:#e7ebf4;color:#20263b}html[data-theme=light] .team-tabs>button[aria-selected=true]{background:#f1e6c9;color:#48340f}
+/* Readable controls and player rows while retaining the compact layout. */
+.workspace-frame .team-builder-page{font-size:14px}
+.workspace-frame .team-builder-heading h1{font-size:32px}
+.workspace-frame .team-builder-heading>div:first-child>p:not(.eyebrow),.workspace-frame .battle-mode p{font-size:14px}
+.workspace-frame .battle-mode{flex-wrap:wrap;align-items:center}
+.workspace-frame .battle-mode>p{flex:1;min-width:180px}
+.workspace-frame .battle-mode>.team-header-actions{margin-left:auto;flex-shrink:0}
+.workspace-frame .battle-mode .team-header-actions>button,.workspace-frame .team-actions button{font-size:13px;padding:9px 11px}
+.workspace-frame .team-builder-page .battle-mode label,.workspace-frame .team-builder-page .battle-mode select,.workspace-frame .add-team-form label,.workspace-frame .member-sidebar label{font-size:13px}
+.workspace-frame .team-builder-page .team-tabs>button{font-size:14px}
+.workspace-frame .team-builder-page .team-tabs>button>span,.workspace-frame .team-assigned-count,.workspace-frame .sidebar-header>span{font-size:12px}
+.workspace-frame .team-builder-page .member-row-name{font-size:17px}
+.workspace-frame .team-builder-page .member-row-gs{font-size:15px}
+.workspace-frame .team-builder-page .party-card .team-name-input{font-size:16px}
+.workspace-frame .team-builder-page .party-card>header small{font-size:13px}
+.workspace-frame .team-builder-page .party-card>header .remove-party{font-size:13px}
+.workspace-frame .team-builder-page .team-slot,.workspace-frame .team-builder-page .roster-sort-note{font-size:14px}
+.team-tab-editor{flex:none;min-width:120px;width:220px;max-width:100%;border:1px solid #dfbd6d;border-radius:6px;background:#101527;color:#f1d58c;padding:9px 12px;font:600 14px 'DM Sans',sans-serif;outline-offset:2px}
+html[data-theme=light] .team-tab-editor{background:#fff;color:#20263b}
+.workspace-frame .team-builder-page .member-sidebar label,.workspace-frame .team-builder-page .member-sidebar input,.workspace-frame .team-builder-page .member-sidebar select{font-size:15px}
+.workspace-frame .team-builder-page .sidebar-header h2{font-size:20px}
