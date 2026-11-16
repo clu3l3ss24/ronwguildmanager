@@ -53,11 +53,11 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
     apply(next, { ...teamNames, [id]: teamNames[id].filter((_, index) => index !== partyIndex) });
   };
   const updatePlacement = (memberId, target) => {
-    if (!editable || !target) return;
+    if (!editable) return;
     const next = cloneTeams(teams); let source = null;
     Object.entries(next).forEach(([id, parties]) => parties.forEach((party, partyIndex) => party.forEach((idInSlot, slotIndex) => { if (idInSlot === memberId) source = [id, partyIndex, slotIndex]; })));
     if (source) next[source[0]][source[1]][source[2]] = null;
-    if (target === 'pool') return apply(next);
+    if (!target || target === 'pool') return source ? apply(next) : undefined;
     const [id, partyIndex, slotIndex] = target.split(':');
     const party = next[id]?.[Number(partyIndex)]; if (!party) return;
     if (fillFromStatic) {
@@ -93,7 +93,7 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
       parties: parties.map((slots, index) => ({ name: teamNames[id][index] || `Party ${index + 1}`, slots: Array.from({ length: 5 }, (_, slot) => { const member = members.find(item => item.id === slots[slot]); return member ? { ...member } : null; }) })),
     })),
   });
-  return <DndContext sensors={sensors} onDragStart={event => setActive(event.active.data.current?.member)} onDragCancel={() => setActive(null)} onDragEnd={({ active: item, over }) => { updatePlacement(item.id, over?.id); setActive(null); }}>
+  return <DndContext sensors={sensors} onDragStart={event => setActive(event.active.data.current?.member)} onDragCancel={() => setActive(null)} onDragEnd={({ active: item, over }) => { updatePlacement(item.id, over?.id ?? null); setActive(null); }}>
     {teamActionsTarget && createPortal(<>{!staticOnly && <button className="user-button screenshot-team-button" disabled={!teamEntries.length} onClick={openScreenshot}>Screenshot team</button>}<button className="add-party" disabled={!editable || !selectedId || full || selectedParties.length >= (staticOnly ? 12 : 8)} title={selectedParties.length >= (staticOnly ? 12 : 8) ? `Maximum of ${staticOnly ? 12 : 8} parties ${staticOnly ? 'in this roster' : 'per team'}` : full ? `${BOARD_MODES[mode].name} party limit reached` : undefined} onClick={() => addParty(selectedId)}>+ Add party</button>{!staticOnly && <button className="remove-party" disabled={!editable || !selectedId} onClick={() => removeTeam(selectedId)}>Remove team</button>}</>, teamActionsTarget)}
     <div className="planner-layout compact-view"><main className="builder-workspace">
       <div className="builder-heading"><div><p className="eyebrow">{staticOnly ? 'GUILD STATIC ROSTER' : 'BATTLEFIELD PLANNER'}</p><h2>{staticOnly ? 'Guild parties' : 'Your teams'}</h2></div><div className="builder-heading-tools">{!staticOnly && activeUsers.length > 0 && <span className="active-collaborators" title={activeUsers.join(', ')}>{activeUsers.length} active</span>}{!staticOnly && <label className="static-fill-toggle" title="When you place a member with a saved Static party, fill this party with that saved lineup."><input type="checkbox" checked={fillFromStatic} onChange={event => setFillFromStatic(event.target.checked)} disabled={!editable || !Object.values(staticParties).some(parties => parties.some(slots => slots.some(Boolean)))} /><span>Static</span></label>}<span className="team-assigned-count">{assigned.size}{Number.isFinite(limit) ? `/${limit}` : ''} assigned</span></div></div>

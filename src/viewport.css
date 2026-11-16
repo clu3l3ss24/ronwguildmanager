@@ -39,6 +39,7 @@
 .workspace-frame .planner-layout .party-slots{grid-template-columns:minmax(0,1fr);overflow-x:visible;gap:8px;padding:8px}
 .workspace-frame .planner-layout .member-sidebar .pool-drop{gap:8px}
 .member-row-name,.member-row-gs{color:#eef1ff}html[data-theme=light] .member-row-name,html[data-theme=light] .member-row-gs{color:#20263b}
+.workspace-frame .planner-layout .party-slots .member-row{padding-right:40px}.workspace-frame .planner-layout .party-slots .remove-slot-member{top:50%;right:5px;transform:translateY(-50%);width:23px;height:23px;font-size:17px}
 .workspace-frame .planner-layout .member-row .status-dot,.member-row .status-dot{flex:0 0 8px;width:8px;height:8px;margin:0;align-self:center}
 /* Vertical five-player parties, with no more than four parties per row. */
 .workspace-frame .builder-workspace{container-type:inline-size;container-name:team-board}
