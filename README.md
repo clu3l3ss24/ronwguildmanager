@@ -21,5 +21,3 @@ The CSV should include a player name or IGN column. The importer also recognizes
 - **Notifications:** Review updates such as static parties being saved or members being removed after a roster upload.
 - **Change Log:** See the planner's feature and update history.
 - **Settings:** Manage your account and guild workspace options.
-
-When signed in, guild information is saved to the shared workspace. The local demo keeps its information in that browser only.
