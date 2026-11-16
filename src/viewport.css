@@ -62,6 +62,7 @@
 .workspace-frame .team-builder-page .battle-mode label,.workspace-frame .team-builder-page .battle-mode select,.workspace-frame .add-team-form label,.workspace-frame .member-sidebar label{font-size:13px}
 .workspace-frame .team-builder-page .team-tabs>button{font-size:14px}
 .workspace-frame .team-builder-page .team-tabs>button>span,.workspace-frame .team-assigned-count,.workspace-frame .sidebar-header>span{font-size:12px}
+.team-tabs>button .team-tab-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:inherit;color:inherit}.team-tabs>button .team-tab-summary{flex:none;font-size:11px;color:#a7afd0;white-space:nowrap}.team-tabs>button[aria-selected=true] .team-tab-summary{color:#f1d58c}
 .workspace-frame .team-builder-page .member-row-name{font-size:17px}
 .workspace-frame .team-builder-page .member-row-gs{font-size:15px}
 .workspace-frame .team-builder-page .party-card .team-name-input{font-size:16px}
