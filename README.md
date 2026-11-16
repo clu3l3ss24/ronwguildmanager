@@ -22,4 +22,3 @@ The CSV should include a player name or IGN column. The importer also recognizes
 - **Change Log:** See the planner's feature and update history.
 - **Settings:** Manage your account and guild workspace options.
 
-When signed in, guild information is saved to the shared workspace. The local demo keeps its information in that browser only.

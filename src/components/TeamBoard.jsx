@@ -77,6 +77,14 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
     if (displaced && source) next[source[0]][source[1]][source[2]] = displaced;
     apply(next);
   };
+  const removeMember = (memberId, slotId) => {
+    if (!editable) return;
+    const [id, partyIndex, slotIndex] = slotId.split(':');
+    const next = cloneTeams(teams);
+    if (next[id]?.[Number(partyIndex)]?.[Number(slotIndex)] !== memberId) return;
+    next[id][Number(partyIndex)][Number(slotIndex)] = null;
+    apply(next);
+  };
   const openScreenshot = () => setScreenshotTeam({
     name: 'Full Roster',
     guildName: guildName || 'RONW Guild', modeName: BOARD_MODES[mode].name, createdAt: new Date().toISOString(),
@@ -96,7 +104,7 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
         {!parties.length && <p className="team-empty-party">No parties yet. Add a party to create five player slots.</p>}
         <div className="team-parties">{parties.map((slots, partyIndex) => {
           const summary = partySummary(slots, members);
-          return <article className="party-card" key={`${id}-${partyIndex}`}><header><div><NameEditor value={teamNames[id][partyIndex] || ''} label={`Party name ${groupIndex + 1} ${partyIndex + 1}`} placeholder={`Party ${partyIndex + 1}`} disabled={!editable} onSave={name => apply(teams, { ...teamNames, [id]: teamNames[id].map((current, index) => index === partyIndex ? name : current) })} /><small>{summary.count}/5 · {summary.total.toLocaleString()} GR</small></div><button className="remove-party" disabled={!editable} onClick={() => removeParty(id, partyIndex)} aria-label={`Remove party ${groupIndex + 1} ${partyIndex + 1}`}>Remove party</button></header><div className="party-slots">{slots.map((memberId, slotIndex) => <TeamSlot key={slotIndex} id={`${id}:${partyIndex}:${slotIndex}`} index={slotIndex} disabled={!editable} member={members.find(member => member.id === memberId)} />)}</div></article>;
+          return <article className="party-card" key={`${id}-${partyIndex}`}><header><div><NameEditor value={teamNames[id][partyIndex] || ''} label={`Party name ${groupIndex + 1} ${partyIndex + 1}`} placeholder={`Party ${partyIndex + 1}`} disabled={!editable} onSave={name => apply(teams, { ...teamNames, [id]: teamNames[id].map((current, index) => index === partyIndex ? name : current) })} /><small>{summary.count}/5 · {summary.total.toLocaleString()} GR</small></div><button className="remove-party" disabled={!editable} onClick={() => removeParty(id, partyIndex)} aria-label={`Remove party ${groupIndex + 1} ${partyIndex + 1}`}>Remove party</button></header><div className="party-slots">{slots.map((memberId, slotIndex) => { const slotId = `${id}:${partyIndex}:${slotIndex}`; return <TeamSlot key={slotIndex} id={slotId} index={slotIndex} disabled={!editable} member={members.find(member => member.id === memberId)} onRemove={member => removeMember(member.id, slotId)} />; })}</div></article>;
         })}</div>
       </section> : null)}
     </main><aside className="member-sidebar"><div className="sidebar-header"><p className="eyebrow">ROSTER SOURCE</p><h2>Available Members</h2><span>{available.length} members</span></div><label>Search IGN<input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search player..." /></label><label>Class Filter<select value={classFilter} onChange={event => setClassFilter(event.target.value)}><option value="">All Classes</option>{classes.map(className => <option key={className} value={className}>{className}</option>)}</select></label><label>Member status<select aria-label="Member status" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="online">Online</option><option value="offline">Offline</option></select></label><p className="roster-sort-note">Highest gear score first</p><PoolDrop>{available.map(member => <DraggableMember key={member.id} member={member} disabled={!editable} />)}{!available.length && <p className="sidebar-empty">No available members found.</p>}</PoolDrop></aside></div>

@@ -7,7 +7,7 @@ export function DraggableMember({ member, disabled = false }) {
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
   return <div ref={setNodeRef} style={style} {...listeners} {...attributes} className={isDragging ? 'dragging' : ''}><MemberCard member={member} compact /></div>;
 }
-export default function TeamSlot({ id, member, index, disabled = false }) {
+export default function TeamSlot({ id, member, index, disabled = false, onRemove }) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled });
-  return <div ref={setNodeRef} className={`team-slot ${isOver ? 'over' : ''}`}>{member ? <DraggableMember member={member} disabled={disabled} /> : <span><b>{index + 1}</b> Open slot</span>}</div>;
+  return <div ref={setNodeRef} className={`team-slot ${isOver ? 'over' : ''}`}>{member ? <><DraggableMember member={member} disabled={disabled} /><button type="button" className="remove-slot-member" disabled={disabled} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onRemove?.(member); }} aria-label={`Remove ${member.ign} from party`} title={`Remove ${member.ign} from party`}>×</button></> : <span><b>{index + 1}</b> Open slot</span>}</div>;
 }
