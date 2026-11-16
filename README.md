@@ -15,10 +15,9 @@ The CSV should include a player name or IGN column. The importer also recognizes
 
 - **Overview:** Upload guild data, see roster information, and manage shared access.
 - **Roster:** Search and filter members, check their class and gear score, and remove members when needed.
-- **Team Builder:** Create teams and parties for Guild League, Polarity Zone, or Siege. Auto-balance fills open slots using roster status, role, job, and gear score. With all slots set to Any, it aims for one tank, one healer, one performer, and DPS in the remaining slots; Bard and Clown are preferred performers. Take a clear, paged roster screenshot when the setup is ready.
-- **Static:** Keep a saved list of the guild's regular parties, separate from event teams. Changes are drafts until saved. When a new CSV is uploaded, missing members are removed from their slots, while the saved parties remain available.
+- **Team Builder:** Create teams and parties for Guild League, Polarity Zone, or Siege. Auto-balance fills open slots using roster status, role, job, and gear score. With all slots set to Any, it aims for one tank, one healer, one performer, and DPS in the remaining slots; Bard and Clown are preferred performers. Remove an assigned member with the slot's **×** button or drag them back to Available Members. Take a clear, paged roster screenshot when the setup is ready.
+- **Static:** Keep a saved list of the guild's regular parties, separate from event teams. Changes are drafts until saved. Remove an assigned member with the slot's **×** button or drag them back to Available Members. When a new CSV is uploaded, missing members are removed from their slots, while the saved parties remain available.
 - **Live Team Builder:** Guild members with access can work on the shared event board at the same time and see who else is active.
 - **Notifications:** Review updates such as static parties being saved or members being removed after a roster upload.
 - **Change Log:** See the planner's feature and update history.
 - **Settings:** Manage your account and guild workspace options.
-
