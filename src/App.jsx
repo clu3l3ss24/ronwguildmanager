@@ -130,14 +130,14 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
         const prepared = prepareRosterImport(roster, members);
         setSavedTeams(current => current.map(snapshot => ({ ...snapshot, memberNames: formationMemberNames(snapshot.teams, members, snapshot.memberNames) })));
         setMembers(prepared.members); const cleared = blankBoard(board.mode); boardRef.current = cleared; setBoard(cleared);
-        const clearedStatic = blankStaticBoard(); staticBoardRef.current = clearedStatic; staticBoardVersionRef.current = null; setStaticBoard(clearedStatic); setStaticDraft(clearedStatic);
-        result = { added: prepared.members.length, duplicates: prepared.duplicates };
+        const currentStatic = normalizeStaticBoard(staticBoardRef.current);
+        const reconciledStatic = prepareFormation(currentStatic.teams, prepared.members, currentStatic.groupNames, currentStatic.teamNames);
+        const nextStatic = { ...currentStatic, teams: reconciledStatic.teams };
+        result = { added: prepared.members.length, duplicates: prepared.duplicates, staticBoard: nextStatic };
       }
-      if (firebaseEnabled) {
-        const clearedStatic = blankStaticBoard();
-        localStaticEditRef.current = result.staticBoardEditId || null;
-        staticBoardRef.current = clearedStatic; staticBoardVersionRef.current = result.staticBoardEditId || null; setStaticBoard(clearedStatic); setStaticDraft(clearedStatic);
-      }
+      const nextStatic = normalizeStaticBoard(result.staticBoard || staticBoardRef.current);
+      localStaticEditRef.current = result.staticBoardEditId || null;
+      staticBoardRef.current = nextStatic; staticBoardVersionRef.current = result.staticBoardEditId || null; setStaticBoard(nextStatic); setStaticDraft(nextStatic);
       setError(''); setNotice(''); return result;
     } finally { operationRef.current = false; setBusy(false); }
   };
@@ -338,6 +338,6 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   };
   const active = page === 'settings' ? <Settings user={user} guild={guild} members={members} board={board} staticBoard={staticBoard} savedTeams={savedTeams} onWorkspaceChange={setWorkspace} onLogout={() => logout()} theme={theme} setTheme={setTheme} startPage={startPage} setStartPage={setStartPage} /> : page === 'dashboard' ? <Dashboard sharedReadOnly={guild?.sharedReadOnly || false} guildId={guildId} ownerId={guild?.ownerId} guildName={guild?.name || 'Local demo'} members={members} teams={teams} onImport={importMembers} role={role} /> : page === 'members' ? <Members members={members} onDelete={deleteMember} canDelete={role === 'Account owner'} /> : page === 'static' ? <Teams staticOnly guildName={guild?.name || 'Local demo'} members={members} teams={staticDraft.teams} mode="guild-league" teamNames={staticDraft.teamNames} groupNames={staticDraft.groupNames} onTeamsChange={updateStaticDraft} editable={role !== 'Viewer'} generate={autoBalanceStatic} clear={clearStaticTeams} saveStatic={saveStaticTeams} staticDirty={JSON.stringify(staticBoard) !== JSON.stringify(staticDraft)} busy={busy} /> : <Teams guildName={guild?.name || 'Local demo'} members={members} teams={teams} mode={board.mode} teamNames={board.teamNames} groupNames={board.groupNames} staticParties={staticBoard.teams} staticPartyNames={staticBoard.teamNames} activeUsers={activeTeamBuilderUsers} selectMode={selectMode} onTeamsChange={saveTeams} editable={role !== 'Viewer'} generate={autoBalance} clear={clearTeams} save={saveTeam} activeSaveId={activeSaveId} savedTeams={savedTeams} load={loadTeam} deleteSaved={deleteSavedTeam} busy={busy} />;
   const logout = async () => { try { if (firebaseEnabled) await signOut(auth); else exitDemo(); } catch { setError('Could not sign out. Please try again.'); } };
-  return <div className="workspace-frame"><Navbar page={page} setPage={setPage} role={role} memberCount={members.length} user={user} guild={guild} onLogout={logout} notifications={notifications} clearNotifications={() => setNotifications([])} /><div className="app-shell">{!firebaseEnabled && <p className="demo-banner">Local demo — data stays in this browser. No online account is created.</p>}{error && <p className="workspace-error" role="alert">{error}</p>}{loaded ? active : <p className="workspace-loading" role="status">Loading your workspace…</p>}</div></div>;
+  return <div className="workspace-frame"><Navbar page={page} setPage={setPage} role={role} memberCount={members.length} user={user} guild={guild} onLogout={logout} notifications={notifications} clearNotifications={() => setNotifications([])} /><div className="app-shell">{!firebaseEnabled && <p className="demo-banner">Local demo â€” data stays in this browser. No online account is created.</p>}{error && <p className="workspace-error" role="alert">{error}</p>}{loaded ? active : <p className="workspace-loading" role="status">Loading your workspaceâ€¦</p>}</div></div>;
 }
 

@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, getDocs, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { blankBoard, blankStaticBoard, normalizeBoard, serializeBoard } from './board.js';
-import { formationMemberNames } from './teams.js';
+import { blankBoard, blankStaticBoard, normalizeBoard, normalizeStaticBoard, serializeBoard } from './board.js';
+import { formationMemberNames, prepareFormation } from './teams.js';
 
 export function prepareRosterImport(roster, existingMembers) {
   const existing = new Map(existingMembers.map(member => [member.ign.trim().toLowerCase(), member.id]));
@@ -17,9 +17,13 @@ export function prepareRosterImport(roster, existingMembers) {
 }
 
 export async function replaceGuildRoster(db, guildId, roster) {
-  const [current, guild, saves, teamBoards] = await Promise.all([getDocs(collection(db, 'guilds', guildId, 'members')), getDoc(doc(db, 'guilds', guildId)), getDocs(collection(db, 'guilds', guildId, 'savedTeams')), getDocs(collection(db, 'guilds', guildId, 'teamBoards'))]);
+  const staticRef = doc(db, 'guilds', guildId, 'staticBoard', 'board');
+  const [current, guild, saves, teamBoards, savedStatic] = await Promise.all([getDocs(collection(db, 'guilds', guildId, 'members')), getDoc(doc(db, 'guilds', guildId)), getDocs(collection(db, 'guilds', guildId, 'savedTeams')), getDocs(collection(db, 'guilds', guildId, 'teamBoards')), getDoc(staticRef)]);
   const previousMembers = current.docs.map(item => ({ ...item.data(), id: item.id }));
   const prepared = prepareRosterImport(roster, previousMembers);
+  const staticBoard = normalizeStaticBoard(savedStatic.exists() ? savedStatic.data().teams : blankStaticBoard());
+  const reconciledStatic = prepareFormation(staticBoard.teams, prepared.members, staticBoard.groupNames, staticBoard.teamNames);
+  const nextStatic = { ...staticBoard, teams: reconciledStatic.teams };
   const retained = new Set(prepared.members.map(member => member.id));
   const batch = writeBatch(db);
   // Preserve names in older saves before departing players are deleted.
@@ -37,10 +41,10 @@ export async function replaceGuildRoster(db, guildId, roster) {
   batch.set(doc(db, 'guilds', guildId, 'teamBoards', '_meta'), { mode: boardMode, schemaVersion: 1, updatedAt: serverTimestamp() });
   batch.update(doc(db, 'guilds', guildId), { teams: serializeBoard(blankBoard(boardMode)), boardEditId, updatedAt: serverTimestamp() });
   const staticBoardEditId = crypto.randomUUID();
-  batch.set(doc(db, 'guilds', guildId, 'staticBoard', 'board'), { teams: serializeBoard(blankStaticBoard()), boardEditId: staticBoardEditId, updatedAt: serverTimestamp() });
-  // Roster replacement and both board resets succeed together or leave all unchanged.
+  batch.set(staticRef, { teams: serializeBoard(nextStatic), boardEditId: staticBoardEditId, updatedAt: serverTimestamp() });
+  // Roster replacement, event-board reset and static-member reconciliation are atomic.
   await batch.commit();
-  return { added: prepared.members.length, duplicates: prepared.duplicates, boardEditId, staticBoardEditId };
+  return { added: prepared.members.length, duplicates: prepared.duplicates, boardEditId, staticBoardEditId, staticBoard: nextStatic };
 }
 
 export function describeImportError(error) {
