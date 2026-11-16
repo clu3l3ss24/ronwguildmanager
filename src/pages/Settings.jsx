@@ -4,7 +4,7 @@ import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import '../settings.css';
 
-export default function Settings({ user, guild, members, board, savedTeams, onWorkspaceChange, onLogout, theme, setTheme, startPage, setStartPage }) {
+export default function Settings({ user, guild, members, board, staticBoard, savedTeams, onWorkspaceChange, onLogout, theme, setTheme, startPage, setStartPage }) {
   const owner = Boolean(user && !user.isAnonymous);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -44,7 +44,7 @@ export default function Settings({ user, guild, members, board, savedTeams, onWo
   };
   const exportData = () => {
     const { ownerId, tokenExpiresAt, ...workspace } = guild || {};
-    const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), workspace, members, board, savedTeams }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), workspace, members, board, staticBoard, savedTeams }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'ronw-workspace.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   return <main className="page settings-page"><div className="page-title"><p className="eyebrow">YOUR WORKSPACE</p><h1>Settings</h1><p>Manage your account, workspace, and preferences.</p></div>
@@ -56,7 +56,7 @@ export default function Settings({ user, guild, members, board, savedTeams, onWo
     </> : <><p>{user ? 'You are using shared access. Account and workspace controls belong to the owner.' : 'Local demo: data stays in this browser.'}</p>{guild?.tokenExpiresAt && <p>Access expires {new Date(guild.tokenExpiresAt).toLocaleString()}.</p>}<button className="user-button" onClick={onLogout}>{user ? 'Leave workspace / Sign out' : 'Exit demo'}</button></>}</section>
     {owner && <section className="settings-card"><h2>Change password</h2><form onSubmit={password}><label>Current password<input name="current" type="password" required autoComplete="current-password" /></label><label>New password<input name="next" type="password" required minLength={8} autoComplete="new-password" /></label><label>Confirm new password<input name="confirm" type="password" required minLength={8} autoComplete="new-password" /></label><button className="primary-button">Change password</button></form></section>}
     <section className="settings-card"><h2>Appearance</h2><label>Theme<select value={theme} onChange={e => setTheme(e.target.value)}><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></label><p className="settings-help">Remembered in this browser.</p></section>
-    <section className="settings-card"><h2>Start page</h2><label>Open the app to<select value={startPage} onChange={e => setStartPage(e.target.value)}><option value="dashboard">Overview</option><option value="members">Roster</option><option value="teams">Team Builder</option></select></label><p className="settings-help">Remembered in this browser for your next visit.</p></section><section className="settings-card"><h2>Export workspace</h2><p>Download your roster, active board, and saved formations as JSON. Passwords and access tokens are excluded. This export is a reference backup; restoring JSON is not currently supported.</p><button className="user-button" onClick={exportData}>Download data</button></section>
+    <section className="settings-card"><h2>Start page</h2><label>Open the app to<select value={startPage} onChange={e => setStartPage(e.target.value)}><option value="dashboard">Overview</option><option value="members">Roster</option><option value="teams">Team Builder</option><option value="static">Static</option></select></label><p className="settings-help">Remembered in this browser for your next visit.</p></section><section className="settings-card"><h2>Export workspace</h2><p>Download your roster, active board, and saved formations as JSON. Passwords and access tokens are excluded. This export is a reference backup; restoring JSON is not currently supported.</p><button className="user-button" onClick={exportData}>Download data</button></section>
     {owner && <section className="settings-card settings-danger"><h2>Danger zone</h2><p>Permanently delete your account, workspace, roster, saved formations, and access tokens. Shared sessions will lose access. This cannot be undone. Export your data first if you need a copy.</p><button className="clear-button" onClick={() => setDeleting(!deleting)}>{deleting ? 'Cancel deletion' : 'Delete account…'}</button>{deleting && <form onSubmit={remove}><label>Type “{guild.name}” to confirm<input name="workspace" required autoComplete="off" /></label><label>Current password<input name="password" type="password" required autoComplete="current-password" /></label><button className="clear-button">Permanently delete account</button></form>}</section>}
     </fieldset>
   </main>;

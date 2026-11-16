@@ -114,6 +114,18 @@ The app is for any player, with optional guild naming. Existing `guilds/{uid}` p
 
 Deploy the updated Firestore rules alongside the frontend. To enable account deletion on Vercel, add **FIREBASE_SERVICE_ACCOUNT_JSON** as a server-only environment variable containing a Firebase Admin service-account JSON for the same project, then redeploy. Never prefix this secret with `VITE_`, commit it, or expose it in browser code. `/api/delete-account` verifies a recently reauthenticated password account, derives the workspace ID from its verified UID, revokes tokens and sessions, recursively removes the workspace, and deletes the Auth user and profile. Local Vite does not serve Vercel API routes; test deletion via Vercel development or a preview deployment with a dedicated test Firebase project. A failed deletion can partially remove data; the UI reports this and allows retry. Large workspaces may require a longer Vercel function duration or a queued backend deletion job.
 
+### Live team collaboration
+
+The active Team Builder board syncs each team independently through Firestore. Edits appear for everyone as they arrive; changes to different teams can proceed concurrently, while conflicting edits to the same team are rejected and the latest saved board syncs. The Team Builder heading shows the number and names of active viewers. Presence refreshes every 20 seconds and expires after 45 seconds without an update. The first editor opening an existing workspace migrates the legacy board into per-team documents.
+
+Deploy the updated `firestore.rules` before enabling this feature.
+
+### Static planner
+
+The Static tab records the guild’s ongoing static parties, independent of event formations. It uses the same roster source and filters as Team Builder, with one guild roster containing up to twelve five-person parties. Use **Add party** to add a party; changes, including auto-balance and Clear All, remain drafts until **Save static teams** is clicked. The saved board is stored separately from the multi-mode Team Builder board. Importing a roster resets both boards, and deleting a member clears that assignment from both. Static board data is included in workspace exports.
+
+Deploy the updated `firestore.rules` before using the Static board online. It is stored at `guilds/{guildId}/staticBoard/board` with access limited to workspace readers and editors.
+
 ### Viewport layout
 
 The workspace fills the browser window and keeps navigation visible. Long pages scroll inside the content area. On desktop, the Team Builder board and roster scroll independently; narrow windows stack the panels, and short windows allow the builder page to scroll so its controls remain reachable. Browser zoom remains supported and can trigger responsive layout changes; it is not disabled or counteracted with automatic scaling.

@@ -68,7 +68,7 @@ export default function AccountGate({ children }) {
             const saved = await getDoc(doc(db, 'guilds', guildId));
             if (cancelled || version !== generation) return;
             if (!saved.exists()) return invalidate();
-            if (!cancelled && version === generation && token.data().expiresAt.toMillis() > Date.now()) { setGuild({ ...saved.data(), id: saved.id, tokenPermission: token.data().permission || (saved.data().sharedReadOnly ? 'view' : 'edit'), tokenExpiresAt: token.data().expiresAt.toMillis() }); setLoading(false); setError(''); }
+            if (!cancelled && version === generation && token.data().expiresAt.toMillis() > Date.now()) { setGuild({ ...saved.data(), id: saved.id, tokenPermission: token.data().permission || (saved.data().sharedReadOnly ? 'view' : 'edit'), tokenName: token.data().name || 'Shared member', tokenExpiresAt: token.data().expiresAt.toMillis() }); setLoading(false); setError(''); }
           } catch { if (!cancelled && version === generation) invalidate(); }
         }, invalidate);
       }, invalidate);

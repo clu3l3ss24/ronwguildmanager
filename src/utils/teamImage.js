@@ -1,12 +1,13 @@
 import { getJobIcon } from '../components/JobIcon';
 
-const WIDTH = 1440;
-const PADDING = 36;
-const GAP = 12;
-const CARD_WIDTH = (WIDTH - PADDING * 2 - GAP * 4) / 5;
+const WIDTH = 1920;
+const PADDING = 40;
+const GAP = 10;
+const PARTY_GAP = 7;
+const SLOT_WIDTH = (WIDTH - PADDING * 2 - GAP * 4) / 5;
 const FONT = '"Segoe UI", "Microsoft YaHei", "Noto Sans", sans-serif';
 
-function linesFor(context, text, maxWidth) {
+function linesFor(context, text, maxWidth, maxLines = Infinity) {
   const source = String(text || '');
   const characters = typeof Intl.Segmenter === 'function' ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(source)].map(item => item.segment) : Array.from(source);
   const lines = []; let line = '';
@@ -16,12 +17,13 @@ function linesFor(context, text, maxWidth) {
     else line += character;
   }
   if (line || !lines.length) lines.push(line);
+  if (lines.length > maxLines) { lines.length = maxLines; lines[maxLines - 1] = `${lines[maxLines - 1].slice(0, -1)}…`; }
   return lines;
 }
 
 const font = (context, size, weight = 400) => { context.font = `${weight} ${size}px ${FONT}`; };
-function box(context, x, y, width, height, fill, stroke) {
-  context.beginPath(); context.roundRect(x, y, width, height, 8);
+function box(context, x, y, width, height, fill, stroke, radius = 10) {
+  context.beginPath(); context.roundRect(x, y, width, height, radius);
   context.fillStyle = fill; context.fill();
   if (stroke) { context.strokeStyle = stroke; context.lineWidth = 1; context.stroke(); }
 }
@@ -30,91 +32,133 @@ function writeLines(context, lines, x, y, lineHeight, color) {
   lines.forEach((line, index) => context.fillText(line, x, y + index * lineHeight));
 }
 
-function loadImage(source) {
-  return new Promise(resolve => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => resolve(null); image.src = source; });
-}
-
 export async function renderTeamImage(snapshot) {
+  const contextCanvas = document.createElement('canvas');
+  const measure = contextCanvas.getContext('2d');
+  if (!measure) throw new Error('This browser could not create the team image.');
+  measure.textBaseline = 'top';
+  const teams = snapshot.teams || [];
+  const players = teams.flatMap(team => team.parties.flatMap(party => party.slots)).filter(Boolean);
+  const partyCount = teams.reduce((total, team) => total + team.parties.length, 0);
+  const allGear = players.reduce((sum, member) => sum + Number(member.gearScore || 0), 0);
+
+  // Each party occupies one compact row, with five player slots aligned across the image.
+  const teamLayouts = teams.map(team => {
+    const parties = team.parties.map(party => {
+      const assigned = party.slots.filter(Boolean);
+      const gear = assigned.reduce((sum, member) => sum + Number(member.gearScore || 0), 0);
+      const cards = Array.from({ length: 5 }, (_, index) => {
+        const member = party.slots[index];
+        if (!member) return null;
+        font(measure, 20, 700);
+        const nameLines = linesFor(measure, member.ign, SLOT_WIDTH - 166, 2);
+        font(measure, 12, 500);
+        const classLines = linesFor(measure, member.className || 'Unknown', SLOT_WIDTH - 166, 1);
+        return { member, nameLines, classLines, height: 14 + nameLines.length * 23 + 3 + 15 + 12 };
+      });
+      return { party, cards, assigned, gear, cardHeight: Math.max(68, ...cards.filter(Boolean).map(card => card.height)) };
+    });
+    const nameLines = (() => { font(measure, 21, 700); return linesFor(measure, team.name, WIDTH - PADDING * 2 - 260, 1); })();
+    return { team, parties, nameLines, headerHeight: 54 };
+  });
+  const headerHeight = 164;
+  const height = headerHeight + teamLayouts.reduce((sum, team) => sum + team.headerHeight + team.parties.reduce((partySum, party) => partySum + 21 + party.cardHeight + PARTY_GAP, 0) + (team.parties.length ? 0 : 33) + 17, 0) + 48;
+  if (height > 16384) throw new Error('This roster is too large for one readable image. Reduce the number of parties and try again.');
+  const scale = Math.min(2, 16384 / height);
   const canvas = document.createElement('canvas');
+  canvas.width = WIDTH * scale; canvas.height = Math.ceil(height * scale);
   const context = canvas.getContext('2d');
   if (!context) throw new Error('This browser could not create the team image.');
-  context.textBaseline = 'top';
-  font(context, 36, 700);
-  const titleLines = linesFor(context, snapshot.name, WIDTH - PADDING * 2);
-  font(context, 16);
-  const guildLines = linesFor(context, `${snapshot.guildName} · ${snapshot.modeName}`, WIDTH - PADDING * 2);
-  const headerHeight = 40 + guildLines.length * 23 + 14 + titleLines.length * 44 + 32;
-  const rows = snapshot.parties.map(party => {
-    font(context, 20, 700);
-    const partyLines = linesFor(context, party.name, WIDTH - PADDING * 2 - 230);
-    const cards = party.slots.map(member => {
-      if (!member) return null;
-      font(context, 22, 700);
-      const nameLines = linesFor(context, member.ign, CARD_WIDTH - 28);
-      font(context, 16);
-      const classLines = linesFor(context, member.className || 'Unknown', CARD_WIDTH - 68);
-      return { member, nameLines, classLines, height: 18 + nameLines.length * 28 + 10 + Math.max(28, classLines.length * 21) + 12 + 25 + 14 };
-    });
-    const cardHeight = Math.max(132, ...cards.filter(Boolean).map(card => card.height));
-    return { party, partyLines, cards, cardHeight, headerHeight: partyLines.length * 25 + 12 };
-  });
-  const height = headerHeight + rows.reduce((sum, row) => sum + row.headerHeight + row.cardHeight + 22, 0) + 56;
-  const scale = Math.min(2, 16384 / height);
-  if (scale < 1) throw new Error('This team has too many parties for one readable image. Split it into smaller teams and try again.');
-  canvas.width = WIDTH * scale; canvas.height = Math.ceil(height * scale);
   context.scale(scale, scale); context.textBaseline = 'top';
-  context.fillStyle = '#0b1020'; context.fillRect(0, 0, WIDTH, height);
-  context.fillStyle = '#d7b76d'; context.fillRect(0, 0, WIDTH, 5);
-  font(context, 16, 600);
-  writeLines(context, guildLines, PADDING, 29, 23, '#aab6d8');
-  font(context, 36, 700);
-  writeLines(context, titleLines, PADDING, 43 + guildLines.length * 23, 44, '#f1d58b');
+
+  const background = context.createLinearGradient(0, 0, WIDTH, height);
+  background.addColorStop(0, '#0a1020'); background.addColorStop(0.52, '#111a2d'); background.addColorStop(1, '#0b1222');
+  context.fillStyle = background; context.fillRect(0, 0, WIDTH, height);
+  context.fillStyle = '#d9b765'; context.fillRect(0, 0, WIDTH, 6);
+  font(context, 18, 700); context.fillStyle = '#efd58c';
+  context.fillText(`${snapshot.modeName || 'Guild League'} Roster`, PADDING, 25);
+  font(context, 36, 800); context.fillStyle = '#f6f2e7';
+  context.fillText(snapshot.guildName || 'RONW Guild', PADDING, 55);
+  font(context, 14); context.fillStyle = '#aab6cc';
+  context.fillText(`All teams and assigned players  ·  ${new Date(snapshot.createdAt).toLocaleDateString()}`, PADDING, 105);
+
+  const summaryX = 1380; const summaryY = 44; const summaryWidth = WIDTH - PADDING - summaryX;
+  box(context, summaryX, summaryY, summaryWidth, 82, 'rgba(10, 16, 30, .68)', 'rgba(217, 183, 101, .35)', 13);
+  const summaries = [
+    { value: String(teams.length).padStart(2, '0'), label: 'TEAMS' },
+    { value: String(partyCount).padStart(2, '0'), label: 'PARTIES' },
+    { value: String(players.length).padStart(2, '0'), label: 'PLAYERS' },
+    { value: allGear.toLocaleString(), label: 'TOTAL GS' },
+  ];
+  summaries.forEach((item, index) => {
+    const x = summaryX + 15 + index * 112;
+    font(context, index === 3 ? 18 : 24, 800); context.fillStyle = '#f4df9e'; context.fillText(item.value, x, summaryY + 13);
+    font(context, 10, 700); context.fillStyle = '#9eabc4'; context.fillText(item.label, x, summaryY + 49);
+  });
+  context.fillStyle = 'rgba(217, 183, 101, .4)'; context.fillRect(PADDING, 145, WIDTH - PADDING * 2, 1);
+
   const icons = new Map();
-  for (const member of snapshot.parties.flatMap(party => party.slots).filter(Boolean)) {
-    const icon = getJobIcon(member.className);
-    if (icon) icons.set(icon.source, null);
-  }
-  await Promise.all([...icons.keys()].map(async source => icons.set(source, await loadImage(source))));
+  for (const member of players) { const icon = getJobIcon(member.className); if (icon) icons.set(icon.source, null); }
+  await Promise.all([...icons.keys()].map(source => new Promise(resolve => {
+    const image = new Image(); image.onload = () => { icons.set(source, image); resolve(); }; image.onerror = () => resolve(); image.src = source;
+  })));
+
   let y = headerHeight;
-  for (const row of rows) {
-    font(context, 20, 700);
-    writeLines(context, row.partyLines, PADDING, y, 25, '#e0e7fa');
-    const assigned = row.party.slots.filter(Boolean).length;
-    const score = row.party.slots.filter(Boolean).reduce((sum, member) => sum + Number(member.gearScore || 0), 0);
-    font(context, 15);
-    const summary = `${assigned}/5 · ${score.toLocaleString()} GS`;
-    context.fillStyle = '#aab6d8'; context.fillText(summary, WIDTH - PADDING - context.measureText(summary).width, y + 3);
-    const cardY = y + row.headerHeight;
-    for (let index = 0; index < 5; index += 1) {
-      const x = PADDING + index * (CARD_WIDTH + GAP);
-      const card = row.cards[index];
-      box(context, x, cardY, CARD_WIDTH, row.cardHeight, card ? '#18223a' : '#10182a', card ? '#3b4b70' : '#2c3854');
-      if (!card) {
-        font(context, 18, 500); context.fillStyle = '#7f8eaf';
-        context.fillText(`Slot ${index + 1} · Open`, x + 17, cardY + 24); continue;
-      }
-      const { member, nameLines, classLines } = card;
-      font(context, 22, 700); writeLines(context, nameLines, x + 14, cardY + 16, 28, '#f0f4ff');
-      const classY = cardY + 16 + nameLines.length * 28 + 10;
-      const icon = getJobIcon(member.className);
-      const sprite = icon && icons.get(icon.source);
-      if (sprite) context.drawImage(sprite, icon.x, icon.y, 44, 44, x + 14, classY, 27, 27);
-      else { box(context, x + 14, classY, 27, 27, '#35415f'); font(context, 18, 700); context.fillStyle = '#c7d0e9'; context.fillText('?', x + 22, classY + 4); }
-      font(context, 16); writeLines(context, classLines, x + 49, classY + 2, 21, '#c4cee7');
-      const statsY = classY + Math.max(28, classLines.length * 21) + 12;
-      font(context, 20, 700); context.fillStyle = '#f0d38a'; context.fillText(`${Number(member.gearScore || 0).toLocaleString()} GS`, x + 14, statsY);
-      font(context, 14); context.fillStyle = member.online ? '#79d8ae' : '#9aa7c5';
-      const status = member.online ? 'Online' : 'Offline';
-      context.fillText(status, x + CARD_WIDTH - 14 - context.measureText(status).width, statsY + 4);
+  for (const [teamIndex, teamLayout] of teamLayouts.entries()) {
+    const { team, parties } = teamLayout;
+    const teamPlayers = parties.reduce((count, party) => count + party.assigned.length, 0);
+    const teamGear = parties.reduce((sum, party) => sum + party.gear, 0);
+    box(context, PADDING, y, WIDTH - PADDING * 2, 43, '#19243a', '#344563', 9);
+    context.fillStyle = '#d9b765'; context.fillRect(PADDING, y, 4, 43);
+    font(context, 20, 700); writeLines(context, teamLayout.nameLines, PADDING + 17, y + 11, 23, '#f4f6fb');
+    const teamSummary = `${teamPlayers} players  ·  ${parties.length} parties  ·  ${teamGear.toLocaleString()} GS`;
+    font(context, 12, 600); context.fillStyle = '#a6b3ca';
+    context.fillText(teamSummary, WIDTH - PADDING - context.measureText(teamSummary).width - 14, y + 15);
+    y += teamLayout.headerHeight;
+
+    if (!parties.length) {
+      font(context, 13); context.fillStyle = '#8492aa'; context.fillText('No parties assigned to this team yet.', PADDING + 16, y + 1);
+      y += 33;
     }
-    y += row.headerHeight + row.cardHeight + 22;
+    for (const [partyIndex, row] of parties.entries()) {
+      font(context, 12, 700); context.fillStyle = '#8492aa';
+      context.fillText(row.party.name || `Party ${partyIndex + 1}`, PADDING + 5, y + 2);
+      const summary = `${row.assigned.length}/5  ·  ${row.gear.toLocaleString()} GS`;
+      font(context, 11, 600); context.fillText(summary, WIDTH - PADDING - context.measureText(summary).width, y + 3);
+      const slotY = y + 21;
+      for (let slotIndex = 0; slotIndex < 5; slotIndex += 1) {
+        const x = PADDING + slotIndex * (SLOT_WIDTH + GAP); const card = row.cards[slotIndex];
+        box(context, x, slotY, SLOT_WIDTH, row.cardHeight, card ? '#111b30' : '#101827', card ? '#344563' : '#27344b', 7);
+        if (!card) {
+          context.fillStyle = '#697695'; context.fillRect(x + 1, slotY + 7, 3, row.cardHeight - 14);
+          font(context, 13, 600); context.fillStyle = '#71809b'; context.fillText(`SLOT 0${slotIndex + 1}  |  OPEN`, x + 16, slotY + 25);
+          continue;
+        }
+        const { member, nameLines, classLines } = card;
+        context.fillStyle = '#697695'; context.fillRect(x + 1, slotY + 7, 3, row.cardHeight - 14);
+        context.fillStyle = member.online ? '#66d3a4' : '#78869f';
+        context.beginPath(); context.arc(x + 16, slotY + row.cardHeight / 2, 5, 0, Math.PI * 2); context.fill();
+        const jobIcon = getJobIcon(member.className); const sprite = jobIcon && icons.get(jobIcon.source);
+        if (sprite) context.drawImage(sprite, jobIcon.x, jobIcon.y, 44, 44, x + 29, slotY + (row.cardHeight - 31) / 2, 31, 31);
+        font(context, 20, 700); writeLines(context, nameLines, x + 72, slotY + 10, 23, '#f4f6fb');
+        font(context, 12, 500); writeLines(context, classLines, x + 72, slotY + 13 + nameLines.length * 23, 15, '#99a9c2');
+        font(context, 18, 700); context.fillStyle = '#f4f6fb'; context.textAlign = 'right';
+        context.fillText(Number(member.gearScore || 0).toLocaleString(), x + SLOT_WIDTH - 14, slotY + row.cardHeight / 2 - 10);
+        font(context, 10, 600); context.fillStyle = '#92a1bc';
+        context.fillText('GS', x + SLOT_WIDTH - 14, slotY + row.cardHeight / 2 + 11); context.textAlign = 'left';
+      }
+      y += 21 + row.cardHeight + PARTY_GAP;
+    }
+    y += 17;
   }
-  font(context, 13, 500); context.fillStyle = '#8594b6';
-  context.fillText('RONW GUILD MANAGER', PADDING, height - 31);
-  const stamp = new Date(snapshot.createdAt).toLocaleString();
-  context.fillText(stamp, WIDTH - PADDING - context.measureText(stamp).width, height - 31);
+  context.fillStyle = 'rgba(217, 183, 101, .35)'; context.fillRect(PADDING, height - 33, WIDTH - PADDING * 2, 1);
+  font(context, 11, 700); context.fillStyle = '#8d9bb6';
+  context.fillText(`${snapshot.modeName || 'Guild League'} Roster  |  ALL TEAMS`, PADDING, height - 23);
+  font(context, 11); context.fillStyle = '#73819b'; context.textAlign = 'right';
+  context.fillText('RONW GUILD MANAGER', WIDTH - PADDING, height - 23); context.textAlign = 'left';
+
   const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
   if (!blob) throw new Error('The team image could not be created. Please try again.');
-  const safeName = snapshot.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').trim() || 'Team';
-  return { blob, width: canvas.width, height: canvas.height, filename: `RONW-${safeName}.png` };
+  const safeName = (snapshot.guildName || 'Guild').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').trim() || 'Guild';
+  return { blob, width: canvas.width, height: canvas.height, filename: `RONW-${safeName}-Roster.png` };
 }

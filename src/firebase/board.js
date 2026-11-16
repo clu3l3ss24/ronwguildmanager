@@ -37,6 +37,21 @@ export function normalizeBoard(value) {
 }
 
 export const blankBoard = (mode = 'guild-league') => normalizeBoard({ teams: {}, mode });
+export const STATIC_TEAM_ID = 'guild-static-roster';
+export const blankStaticBoard = () => ({ mode: 'guild-league', teams: { [STATIC_TEAM_ID]: [] }, teamNames: { [STATIC_TEAM_ID]: [] }, groupNames: { [STATIC_TEAM_ID]: 'Guild static roster' } });
+
+export function normalizeStaticBoard(value) {
+  const board = normalizeBoard(value);
+  const parties = [];
+  const partyNames = [];
+  for (const [id, teamParties] of Object.entries(board.teams)) {
+    teamParties.forEach((party, index) => {
+      parties.push(party);
+      partyNames.push(board.teamNames[id]?.[index] || '');
+    });
+  }
+  return { mode: 'guild-league', teams: { [STATIC_TEAM_ID]: parties }, teamNames: { [STATIC_TEAM_ID]: partyNames }, groupNames: { [STATIC_TEAM_ID]: 'Guild static roster' } };
+}
 
 // Keep mode and team names inside the existing Firestore teams map.
 // This uses the same guild document permissions as previous formations.

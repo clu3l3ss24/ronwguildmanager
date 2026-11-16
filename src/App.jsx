@@ -1,16 +1,19 @@
-ï»¿import { useEffect, useRef, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, runTransaction, serverTimestamp, setDoc } from 'firebase/firestore';
+import { useEffect, useRef, useState } from 'react';
+import { collection, deleteDoc, doc, getDocs, onSnapshot, runTransaction, serverTimestamp, setDoc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import Navbar from './components/Navbar'; import Dashboard from './pages/Dashboard'; import Members from './pages/Members'; import Teams from './pages/Teams';
 import { auth, db, firebaseEnabled } from './firebase/config';
 import Settings from './pages/Settings';
 import AccountGate from './components/AccountGate';
-import { advanceHistory, emptyHistory, formationMemberNames, prepareFormation } from './firebase/teams';
-import { autoBalanceBoard, blankBoard, boardError, BOARD_MODES, changeBoardMode, formationSaveError, normalizeBoard, serializeBoard } from './firebase/board';
+import { formationMemberNames, prepareFormation } from './firebase/teams';
+import { autoBalanceBoard, blankBoard, blankStaticBoard, boardError, BOARD_MODES, changeBoardMode, formationSaveError, normalizeBoard, normalizeStaticBoard, serializeBoard } from './firebase/board';
 import { prepareRosterImport, replaceGuildRoster } from './firebase/importRoster';
 
 const seedMembers = [];
 const stored = key => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
+const boardMetaId = '_meta';
+const teamRecord = (value, id) => { const groups = serializeBoard(value).groups; const index = groups.findIndex(group => group.id === id); return index < 0 ? null : { ...groups[index], order: index }; };
+const boardFromTeamDocs = (snap, fallbackMode) => normalizeBoard({ mode: snap.docs.find(item => item.id === boardMetaId)?.data().mode || fallbackMode, teams: { groups: snap.docs.filter(item => item.id !== boardMetaId).sort((a, b) => (a.data().order ?? Number.MAX_SAFE_INTEGER) - (b.data().order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id)).map(item => ({ id: item.id, name: item.data().name || '', parties: item.data().parties || [] })) } });
 export default function App() {
   return <AccountGate>{session => <GuildWorkspace key={`${session.user?.uid || 'local-demo'}:${session.guild?.id || ''}`} {...session} />}</AccountGate>;
 }
@@ -26,7 +29,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   const tokenPermission = guild?.tokenPermission;
   guild = workspace;
   role = user?.isAnonymous ? ((tokenPermission || (guild?.sharedReadOnly ? 'view' : 'edit')) === 'view' ? 'Viewer' : 'Collaborator') : 'Account owner';
-  const [startPage, setStartPage] = useState(() => { const saved = localStorage.getItem('ronw-start-page'); return ['dashboard', 'members', 'teams'].includes(saved) ? saved : 'dashboard'; });
+  const [startPage, setStartPage] = useState(() => { const saved = localStorage.getItem('ronw-start-page'); return ['dashboard', 'members', 'teams', 'static'].includes(saved) ? saved : 'dashboard'; });
   useEffect(() => { localStorage.setItem('ronw-start-page', startPage); }, [startPage]);
   const [page, setPage] = useState(startPage);
   const [error, setError] = useState('');
@@ -34,44 +37,88 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   const [members, setMembers] = useState(() => firebaseEnabled ? [] : stored('row-members') || seedMembers);
   const [board, setBoard] = useState(() => normalizeBoard(firebaseEnabled ? blankBoard() : stored('row-teams') || blankBoard()));
   const teams = board.teams;
+  const [staticBoard, setStaticBoard] = useState(() => normalizeStaticBoard(firebaseEnabled ? blankStaticBoard() : stored('row-static-teams') || blankStaticBoard()));
+  const [staticDraft, setStaticDraft] = useState(() => normalizeStaticBoard(firebaseEnabled ? blankStaticBoard() : stored('row-static-teams') || blankStaticBoard()));
   const [savedTeams, setSavedTeams] = useState(() => firebaseEnabled ? [] : (stored('row-saved-teams') || []).map(item => ({ ...item, ...normalizeBoard(item) })));
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState('');
+  const [notifications, setNotifications] = useState([]);
+  const [presenceDocs, setPresenceDocs] = useState([]);
+  const [presenceClock, setPresenceClock] = useState(Date.now());
+  const setNotice = message => { if (message) setNotifications(current => [{ id: crypto.randomUUID(), message, createdAt: new Date().toISOString() }, ...current].slice(0, 50)); };
   const [activeSaveId, setActiveSaveId] = useState(null);
-  const [history, setHistory] = useState(emptyHistory);
-  const historyRef = useRef(history);
   const boardRef = useRef(board);
-  const boardVersionRef = useRef(null);
-  const localEditRef = useRef(null);
+  const collabBoardReadyRef = useRef(false);
+  const staticBoardRef = useRef(staticBoard);
+  const staticBoardVersionRef = useRef(null);
+  const localStaticEditRef = useRef(null);
   const operationRef = useRef(false);
-  const updateHistory = next => { historyRef.current = next; setHistory(next); };
   const guildId = guild?.id;
   useEffect(() => {
     if (!firebaseEnabled) return;
     let active = true;
     const ready = new Set();
-    const mark = key => { ready.add(key); if (active && ready.size === 3) setLoaded(true); };
+    const mark = key => { ready.add(key); if (active && ready.size === 4) setLoaded(true); };
     const failed = () => { if (active) setError('Could not load your workspace. Check your connection and Firestore rules, then reload.'); };
+    const failedStatic = () => { if (active) { setError('Could not load the Static planner. Deploy the latest Firestore rules, then reload.'); mark('static'); } };
     const unsubscribers = [
       onSnapshot(collection(db, 'guilds', guildId, 'members'), snap => { if (active) { setMembers(snap.docs.map(item => ({ ...item.data(), id: item.id }))); mark('members'); } }, failed),
       onSnapshot(doc(db, 'guilds', guildId), snap => { if (active && snap.exists()) {
         setWorkspace(current => ({ ...current, ...snap.data() }));
-        const next = normalizeBoard(snap.data().teams);
-        const version = snap.data().boardEditId || null;
-        const changed = JSON.stringify(next) !== JSON.stringify(boardRef.current) || version !== boardVersionRef.current;
-        if (ready.has('teams') && changed && version !== localEditRef.current) {
-          updateHistory(emptyHistory());
-          setNotice('The shared board was updated in another session. Undo history has been reset.');
+        if (!collabBoardReadyRef.current) {
+          const next = normalizeBoard(snap.data().teams);
+          boardRef.current = next; setBoard(next);
         }
-        boardRef.current = next; boardVersionRef.current = version; setBoard(next); mark('teams');
+        mark('teams');
       } }, failed),
       onSnapshot(collection(db, 'guilds', guildId, 'savedTeams'), snap => { if (active) { setSavedTeams(snap.docs.map(item => ({ ...item.data(), id: item.id, ...normalizeBoard(item.data().teams) })).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))); mark('saved'); } }, failed),
+      onSnapshot(collection(db, 'guilds', guildId, 'teamBoards'), snap => { if (!active) return;
+        const meta = snap.docs.find(item => item.id === boardMetaId);
+        if (!meta) {
+          if (role !== 'Viewer') runTransaction(db, async transaction => {
+            const metaRef = doc(db, 'guilds', guildId, 'teamBoards', boardMetaId);
+            const savedMeta = await transaction.get(metaRef);
+            if (savedMeta.exists()) return;
+            const guildRef = doc(db, 'guilds', guildId);
+            const savedGuild = await transaction.get(guildRef);
+            const legacy = normalizeBoard(savedGuild.data()?.teams || blankBoard());
+            for (const [order, group] of serializeBoard(legacy).groups.entries()) transaction.set(doc(db, 'guilds', guildId, 'teamBoards', group.id), { name: group.name, parties: group.parties, order, updatedAt: serverTimestamp() });
+            transaction.set(metaRef, { mode: legacy.mode, schemaVersion: 1, updatedAt: serverTimestamp() });
+          }).catch(failed);
+          return;
+        }
+        collabBoardReadyRef.current = true;
+        const next = boardFromTeamDocs(snap, 'guild-league');
+        boardRef.current = next; setBoard(next); mark('teams');
+      }, failed),
+      onSnapshot(doc(db, 'guilds', guildId, 'staticBoard', 'board'), snap => { if (active) {
+        const next = normalizeStaticBoard(snap.exists() ? snap.data().teams : blankStaticBoard());
+        const version = snap.exists() ? snap.data().boardEditId || null : null;
+        const changed = JSON.stringify(next) !== JSON.stringify(staticBoardRef.current) || version !== staticBoardVersionRef.current;
+        if (ready.has('static') && changed && version !== localStaticEditRef.current) setNotice('The shared static board was updated in another session.');
+        staticBoardRef.current = next; staticBoardVersionRef.current = version; setStaticBoard(next); setStaticDraft(next); mark('static');
+      } }, failedStatic),
     ];
     return () => { active = false; unsubscribers.forEach(unsubscribe => unsubscribe()); };
-  }, [guildId]);
+  }, [guildId, role]);
   useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-members', JSON.stringify(members)); }, [members]);
   useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-saved-teams', JSON.stringify(savedTeams)); }, [savedTeams]);
   useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-teams', JSON.stringify(board)); }, [board]);
+  useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-static-teams', JSON.stringify(staticBoard)); }, [staticBoard]);
+  useEffect(() => {
+    if (!firebaseEnabled || !guildId) return;
+    return onSnapshot(collection(db, 'guilds', guildId, 'teamBuilderPresence'), snap => setPresenceDocs(snap.docs.map(item => ({ id: item.id, ...item.data() }))), () => {});
+  }, [guildId]);
+  useEffect(() => {
+    if (!firebaseEnabled || !guildId || page !== 'teams' || !user?.uid) return;
+    const presenceRef = doc(db, 'guilds', guildId, 'teamBuilderPresence', user.uid);
+    const displayName = user.displayName || guild?.tokenName || (user.isAnonymous ? 'Shared member' : 'Guild owner');
+    const pulse = () => setDoc(presenceRef, { displayName, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+    pulse();
+    const interval = setInterval(pulse, 20000);
+    return () => { clearInterval(interval); deleteDoc(presenceRef).catch(() => {}); };
+  }, [guildId, page, user?.uid, user?.displayName, guild?.tokenName]);
+  useEffect(() => { const interval = setInterval(() => setPresenceClock(Date.now()), 10000); return () => clearInterval(interval); }, []);
+  const activeTeamBuilderUsers = presenceDocs.filter(item => { const updatedAt = item.updatedAt?.toMillis?.(); return updatedAt && presenceClock - updatedAt < 45000; }).map(item => item.displayName);
   const importMembers = async roster => {
     if (role !== 'Account owner') throw Object.assign(new Error(), { code: 'permission-denied' });
     if (operationRef.current) throw Object.assign(new Error(), { code: 'import/busy' });
@@ -83,38 +130,96 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
         const prepared = prepareRosterImport(roster, members);
         setSavedTeams(current => current.map(snapshot => ({ ...snapshot, memberNames: formationMemberNames(snapshot.teams, members, snapshot.memberNames) })));
         setMembers(prepared.members); const cleared = blankBoard(board.mode); boardRef.current = cleared; setBoard(cleared);
+        const clearedStatic = blankStaticBoard(); staticBoardRef.current = clearedStatic; staticBoardVersionRef.current = null; setStaticBoard(clearedStatic); setStaticDraft(clearedStatic);
         result = { added: prepared.members.length, duplicates: prepared.duplicates };
       }
-      updateHistory(emptyHistory()); setError(''); setNotice(''); return result;
+      if (firebaseEnabled) {
+        const clearedStatic = blankStaticBoard();
+        localStaticEditRef.current = result.staticBoardEditId || null;
+        staticBoardRef.current = clearedStatic; staticBoardVersionRef.current = result.staticBoardEditId || null; setStaticBoard(clearedStatic); setStaticDraft(clearedStatic);
+      }
+      setError(''); setNotice(''); return result;
     } finally { operationRef.current = false; setBusy(false); }
   };
   const reportFailure = () => setError('Your change could not be saved. Check your connection and try again.');
-  const saveTeams = async (next, action = 'edit') => {
+  const saveTeams = async next => {
     if (role === 'Viewer' || operationRef.current) return false;
-    const before = normalizeBoard(boardRef.current);
+    if (firebaseEnabled && !collabBoardReadyRef.current) { setError('Preparing the shared team board. Try again in a moment.'); return false; }
+    const before = normalizeBoard(board);
     const updated = normalizeBoard(typeof next === 'function' ? next(before) : next);
     const validationError = boardError(updated);
     if (validationError) { setError(validationError); return false; }
-    if (JSON.stringify(before) === JSON.stringify(updated)) return true;
-    const previousHistory = historyRef.current;
-    const expectedVersion = boardVersionRef.current;
-    const editId = crypto.randomUUID();
-    localEditRef.current = editId;
+    const ids = new Set([...Object.keys(before.teams), ...Object.keys(updated.teams)]);
+    const changedIds = [...ids].filter(id => JSON.stringify(teamRecord(before, id)) !== JSON.stringify(teamRecord(updated, id)));
+    const modeChanged = before.mode !== updated.mode;
+    if (!changedIds.length && !modeChanged) return true;
     operationRef.current = true; setBusy(true); setNotice('');
     try {
       if (firebaseEnabled) await runTransaction(db, async transaction => {
-        const ref = doc(db, 'guilds', guildId);
-        const saved = await transaction.get(ref);
-        if (!saved.exists() || (saved.data().boardEditId || null) !== expectedVersion || JSON.stringify(normalizeBoard(saved.data().teams)) !== JSON.stringify(before)) throw Object.assign(new Error('Board changed'), { code: 'formation/conflict' });
-        transaction.update(ref, { teams: serializeBoard(updated), boardEditId: editId, updatedAt: serverTimestamp() });
+        const metaRef = doc(db, 'guilds', guildId, 'teamBoards', boardMetaId);
+        const meta = await transaction.get(metaRef);
+        if (!meta.exists() || meta.data().mode !== before.mode) throw Object.assign(new Error('Board changed'), { code: 'formation/conflict' });
+        const refs = [...ids].map(id => [id, doc(db, 'guilds', guildId, 'teamBoards', id)]);
+        const snapshots = await Promise.all(refs.map(([, ref]) => transaction.get(ref)));
+        const currentRecords = new Map(refs.map(([id], index) => [id, snapshots[index].exists() ? { id, name: snapshots[index].data().name || '', parties: snapshots[index].data().parties || [], order: snapshots[index].data().order ?? 0 } : null]));
+        for (const id of changedIds) if (JSON.stringify(currentRecords.get(id)) !== JSON.stringify(teamRecord(before, id))) throw Object.assign(new Error('Team changed'), { code: 'formation/conflict' });
+        const candidate = normalizeBoard({ mode: before.mode, teams: { groups: [...currentRecords.values()].filter(Boolean).map(record => ({ id: record.id, name: record.name, parties: record.parties })) } });
+        for (const id of changedIds) {
+          const record = teamRecord(updated, id);
+          if (!record) { delete candidate.teams[id]; delete candidate.teamNames[id]; delete candidate.groupNames[id]; }
+          else { candidate.teams[id] = updated.teams[id]; candidate.teamNames[id] = updated.teamNames[id]; candidate.groupNames[id] = updated.groupNames[id]; }
+        }
+        candidate.mode = updated.mode;
+        if (boardError(candidate)) throw Object.assign(new Error('Board changed'), { code: 'formation/conflict' });
+        for (const id of changedIds) {
+          const ref = doc(db, 'guilds', guildId, 'teamBoards', id);
+          const record = teamRecord(updated, id);
+          if (!record) transaction.delete(ref);
+          else transaction.set(ref, { name: record.name, parties: record.parties, order: record.order, updatedAt: serverTimestamp() });
+        }
+        if (modeChanged) transaction.update(metaRef, { mode: updated.mode, updatedAt: serverTimestamp() });
       });
-      if (!firebaseEnabled || boardVersionRef.current === expectedVersion || boardVersionRef.current === editId) {
-        boardRef.current = updated; boardVersionRef.current = editId; setBoard(updated);
-        updateHistory(advanceHistory(previousHistory, before, updated, action));
+      if (!firebaseEnabled) { boardRef.current = updated; setBoard(updated); }
+      setError(''); return true;
+    } catch (failure) {
+      if (failure.code === 'formation/conflict') setError('Someone changed this team or battle mode while you were editing. The latest board is syncing; try that change again.');
+      else reportFailure();
+      return false;
+    } finally { operationRef.current = false; setBusy(false); }
+  };
+  const updateStaticDraft = next => {
+    if (role === 'Viewer' || operationRef.current) return false;
+    const updated = normalizeStaticBoard(typeof next === 'function' ? next(staticDraft) : next);
+    const validationError = boardError(updated);
+    if (validationError) { setError(validationError); return false; }
+    setStaticDraft(updated); setError(''); return true;
+  };
+  const saveStaticTeams = async () => {
+    if (role === 'Viewer' || operationRef.current) return false;
+    const before = normalizeStaticBoard(staticBoardRef.current);
+    const updated = normalizeStaticBoard(staticDraft);
+    const validationError = boardError(updated);
+    if (validationError) { setError(validationError); return false; }
+    if (JSON.stringify(before) === JSON.stringify(updated)) return true;
+    const expectedVersion = staticBoardVersionRef.current;
+    const editId = crypto.randomUUID();
+    localStaticEditRef.current = editId;
+    operationRef.current = true; setBusy(true); setNotice('');
+    try {
+      if (firebaseEnabled) await runTransaction(db, async transaction => {
+        const ref = doc(db, 'guilds', guildId, 'staticBoard', 'board');
+        const saved = await transaction.get(ref);
+        const current = normalizeStaticBoard(saved.exists() ? saved.data().teams : blankStaticBoard());
+        const version = saved.exists() ? saved.data().boardEditId || null : null;
+        if (version !== expectedVersion || JSON.stringify(current) !== JSON.stringify(before)) throw Object.assign(new Error('Static board changed'), { code: 'formation/conflict' });
+        transaction.set(ref, { teams: serializeBoard(updated), boardEditId: editId, updatedAt: serverTimestamp() });
+      });
+      if (!firebaseEnabled || staticBoardVersionRef.current === expectedVersion || staticBoardVersionRef.current === editId) {
+        staticBoardRef.current = updated; staticBoardVersionRef.current = editId; setStaticBoard(updated); setStaticDraft(updated); setNotice('Guild static teams saved.');
       }
       setError(''); return true;
     } catch (failure) {
-      if (failure.code === 'formation/conflict') { updateHistory(emptyHistory()); setError('Another session changed the board. Your change was not applied. Review the current board and try again.'); }
+      if (failure.code === 'formation/conflict') setError('Another session changed the static board. Review the current board and try again.');
       else reportFailure();
       return false;
     } finally { operationRef.current = false; setBusy(false); }
@@ -122,18 +227,37 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   const deleteMember = async id => {
     if (role !== 'Account owner' || operationRef.current) return;
     const next = Object.fromEntries(Object.entries(teams).map(([key, parties]) => [key, parties.map(slots => slots.map(item => item === id ? null : item))]));
-    if (!firebaseEnabled) { setMembers(current => current.filter(member => member.id !== id)); const cleaned = { ...boardRef.current, teams: next }; boardRef.current = cleaned; setBoard(cleaned); updateHistory(emptyHistory()); return; }
+    const cleanedStatic = normalizeStaticBoard({ ...staticBoardRef.current, teams: Object.fromEntries(Object.entries(staticBoardRef.current.teams).map(([key, parties]) => [key, parties.map(slots => slots.map(item => item === id ? null : item))])) });
+    if (!firebaseEnabled) { setMembers(current => current.filter(member => member.id !== id)); const cleaned = { ...boardRef.current, teams: next }; boardRef.current = cleaned; setBoard(cleaned); staticBoardRef.current = cleanedStatic; setStaticBoard(cleanedStatic); setStaticDraft(cleanedStatic); return; }
+    let finalStatic = cleanedStatic;
+    const staticEditId = crypto.randomUUID();
+    const teamBoardDocs = await getDocs(collection(db, 'guilds', guildId, 'teamBoards'));
+    const teamBoardRefs = teamBoardDocs.docs.filter(item => item.id !== boardMetaId).map(item => doc(db, 'guilds', guildId, 'teamBoards', item.id));
+    localStaticEditRef.current = staticEditId;
     operationRef.current = true; setBusy(true);
     try {
       await runTransaction(db, async transaction => {
         const guildRef = doc(db, 'guilds', guildId);
         const saved = await transaction.get(guildRef);
+        const staticRef = doc(db, 'guilds', guildId, 'staticBoard', 'board');
+        const savedStatic = await transaction.get(staticRef);
+        const currentTeamSnapshots = await Promise.all(teamBoardRefs.map(ref => transaction.get(ref)));
         const current = normalizeBoard(saved.data().teams);
         const cleaned = Object.fromEntries(Object.entries(current.teams).map(([lane, parties]) => [lane, parties.map(slots => slots.map(item => item === id ? null : item))]));
+        const currentStatic = normalizeStaticBoard(savedStatic.exists() ? savedStatic.data().teams : blankStaticBoard());
+        const cleanedStaticTeams = Object.fromEntries(Object.entries(currentStatic.teams).map(([lane, parties]) => [lane, parties.map(slots => slots.map(item => item === id ? null : item))]));
+        finalStatic = { ...currentStatic, mode: 'guild-league', teams: cleanedStaticTeams };
         transaction.delete(doc(db, 'guilds', guildId, 'members', id));
+        currentTeamSnapshots.forEach((snapshot, index) => {
+          if (!snapshot.exists()) return;
+          const parties = snapshot.data().parties || [];
+          const nextParties = parties.map(party => ({ ...party, slots: party.slots.map(memberId => memberId === id ? null : memberId) }));
+          if (JSON.stringify(parties) !== JSON.stringify(nextParties)) transaction.update(teamBoardRefs[index], { parties: nextParties, updatedAt: serverTimestamp() });
+        });
         transaction.update(guildRef, { teams: serializeBoard({ ...current, teams: cleaned }), boardEditId: crypto.randomUUID(), updatedAt: serverTimestamp() });
+        transaction.set(staticRef, { teams: serializeBoard(finalStatic), boardEditId: staticEditId, updatedAt: serverTimestamp() });
       });
-      updateHistory(emptyHistory()); setError('');
+      staticBoardRef.current = finalStatic; staticBoardVersionRef.current = staticEditId; setStaticBoard(finalStatic); setStaticDraft(finalStatic); setError('');
     } catch { reportFailure(); }
     finally { operationRef.current = false; setBusy(false); }
   };
@@ -148,12 +272,25 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
     }
     return success;
   };
+  const autoBalanceStatic = async (status = 'all', preferences = null) => {
+    const before = Object.values(staticDraft.teams).flat(2).filter(Boolean).length;
+    const next = autoBalanceBoard(members, staticDraft, status, preferences);
+    next.mode = 'guild-league';
+    const success = updateStaticDraft(next);
+    if (success) {
+      const filled = Object.values(next.teams).flat(2).filter(Boolean).length - before;
+      const unfilled = Object.values(next.teams).flat(2).filter(id => !id).length;
+      setNotice(`Filled ${filled} empty slot(s) using the highest-GS matching members.${unfilled ? ` ${unfilled} slot(s) remain empty because no matching available member was found.` : ''}`);
+    }
+    return success;
+  };
   const clearTeams = () => saveTeams(blankBoard(boardRef.current.mode));
+  const clearStaticTeams = () => updateStaticDraft(blankStaticBoard());
   const selectMode = mode => {
     if (mode === boardRef.current.mode) return;
     const next = changeBoardMode(boardRef.current, mode);
     const removedTeams = Object.values(boardRef.current.teams).flat().length - Object.values(next.teams).flat().length;
-    if (removedTeams > 0 && !window.confirm(`Switch to ${BOARD_MODES[mode].name}? ${removedTeams} excess ${removedTeams === 1 ? 'party' : 'parties'} will be removed and their players returned to Available Members. You can undo this change.`)) return;
+    if (removedTeams > 0 && !window.confirm(`Switch to ${BOARD_MODES[mode].name}? ${removedTeams} excess ${removedTeams === 1 ? 'party' : 'parties'} will be removed and their players returned to Available Members.`)) return;
     saveTeams(next);
   };
   const saveTeam = async (name, targetId = null) => {
@@ -199,10 +336,8 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
     try { if (firebaseEnabled) await deleteDoc(doc(db, 'guilds', guildId, 'savedTeams', id)); else setSavedTeams(current => current.filter(snapshot => snapshot.id !== id)); setError(''); setNotice('Saved formation deleted. The active board is unchanged.'); return true; } catch { reportFailure(); return false; }
     finally { operationRef.current = false; setBusy(false); }
   };
-  const undo = () => { const previous = historyRef.current.past.at(-1); if (previous) saveTeams(previous, 'undo'); };
-  const redo = () => { const next = historyRef.current.future.at(-1); if (next) saveTeams(next, 'redo'); };
-  const active = page === 'settings' ? <Settings user={user} guild={guild} members={members} board={board} savedTeams={savedTeams} onWorkspaceChange={setWorkspace} onLogout={() => logout()} theme={theme} setTheme={setTheme} startPage={startPage} setStartPage={setStartPage} /> : page === 'dashboard' ? <Dashboard sharedReadOnly={guild?.sharedReadOnly || false} guildId={guildId} ownerId={guild?.ownerId} guildName={guild?.name || 'Local demo'} members={members} teams={teams} onImport={importMembers} role={role} /> : page === 'members' ? <Members members={members} onDelete={deleteMember} canDelete={role === 'Account owner'} /> : <Teams guildName={guild?.name || 'Local demo'} members={members} teams={teams} mode={board.mode} teamNames={board.teamNames} groupNames={board.groupNames} selectMode={selectMode} onTeamsChange={saveTeams} editable={role !== 'Viewer'} generate={autoBalance} clear={clearTeams} save={saveTeam} activeSaveId={activeSaveId} savedTeams={savedTeams} load={loadTeam} deleteSaved={deleteSavedTeam} busy={busy} notice={notice} undo={undo} redo={redo} canUndo={history.past.length > 0} canRedo={history.future.length > 0} />;
+  const active = page === 'settings' ? <Settings user={user} guild={guild} members={members} board={board} staticBoard={staticBoard} savedTeams={savedTeams} onWorkspaceChange={setWorkspace} onLogout={() => logout()} theme={theme} setTheme={setTheme} startPage={startPage} setStartPage={setStartPage} /> : page === 'dashboard' ? <Dashboard sharedReadOnly={guild?.sharedReadOnly || false} guildId={guildId} ownerId={guild?.ownerId} guildName={guild?.name || 'Local demo'} members={members} teams={teams} onImport={importMembers} role={role} /> : page === 'members' ? <Members members={members} onDelete={deleteMember} canDelete={role === 'Account owner'} /> : page === 'static' ? <Teams staticOnly guildName={guild?.name || 'Local demo'} members={members} teams={staticDraft.teams} mode="guild-league" teamNames={staticDraft.teamNames} groupNames={staticDraft.groupNames} onTeamsChange={updateStaticDraft} editable={role !== 'Viewer'} generate={autoBalanceStatic} clear={clearStaticTeams} saveStatic={saveStaticTeams} staticDirty={JSON.stringify(staticBoard) !== JSON.stringify(staticDraft)} busy={busy} /> : <Teams guildName={guild?.name || 'Local demo'} members={members} teams={teams} mode={board.mode} teamNames={board.teamNames} groupNames={board.groupNames} staticParties={staticBoard.teams} staticPartyNames={staticBoard.teamNames} activeUsers={activeTeamBuilderUsers} selectMode={selectMode} onTeamsChange={saveTeams} editable={role !== 'Viewer'} generate={autoBalance} clear={clearTeams} save={saveTeam} activeSaveId={activeSaveId} savedTeams={savedTeams} load={loadTeam} deleteSaved={deleteSavedTeam} busy={busy} />;
   const logout = async () => { try { if (firebaseEnabled) await signOut(auth); else exitDemo(); } catch { setError('Could not sign out. Please try again.'); } };
-  return <div className="workspace-frame"><Navbar page={page} setPage={setPage} role={role} memberCount={members.length} user={user} guild={guild} onLogout={logout} /><div className="app-shell">{!firebaseEnabled && <p className="demo-banner">Local demo â€” data stays in this browser. No online account is created.</p>}{error && <p className="workspace-error" role="alert">{error}</p>}{loaded ? active : <p className="workspace-loading" role="status">Loading your workspaceâ€¦</p>}</div></div>;
+  return <div className="workspace-frame"><Navbar page={page} setPage={setPage} role={role} memberCount={members.length} user={user} guild={guild} onLogout={logout} notifications={notifications} clearNotifications={() => setNotifications([])} /><div className="app-shell">{!firebaseEnabled && <p className="demo-banner">Local demo — data stays in this browser. No online account is created.</p>}{error && <p className="workspace-error" role="alert">{error}</p>}{loaded ? active : <p className="workspace-loading" role="status">Loading your workspace…</p>}</div></div>;
 }
 

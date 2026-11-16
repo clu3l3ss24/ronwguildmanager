@@ -117,6 +117,46 @@ service cloud.firestore {
         allow create, update: if canManageGuild(guildId)
           && request.resource.data.ownerId == get(/databases/$(database)/documents/guilds/$(guildId)).data.ownerId;
       }
+      match /teamBoards/{teamId} {
+        allow get, list: if canReadGuild(guildId);
+        allow create, update: if teamId == '_meta'
+          ? canManageGuild(guildId)
+            && request.resource.data.keys().hasOnly(['mode', 'schemaVersion', 'updatedAt'])
+            && request.resource.data.mode in ['guild-league', 'polarity-zone', 'siege']
+            && request.resource.data.schemaVersion == 1
+            && request.resource.data.updatedAt == request.time
+          : canManageGuild(guildId)
+            && request.resource.data.keys().hasOnly(['name', 'parties', 'order', 'updatedAt'])
+            && request.resource.data.name is string
+            && request.resource.data.name.size() <= 60
+            && request.resource.data.parties is list
+            && request.resource.data.parties.size() <= 8
+            && request.resource.data.order is int
+            && request.resource.data.order >= 0
+            && request.resource.data.updatedAt == request.time;
+        allow delete: if teamId != '_meta' && canManageGuild(guildId);
+      }
+      match /teamBuilderPresence/{uid} {
+        allow get, list: if canReadGuild(guildId);
+        allow create, update: if uid == request.auth.uid
+          && canReadGuild(guildId)
+          && request.resource.data.keys().hasOnly(['displayName', 'updatedAt'])
+          && request.resource.data.displayName is string
+          && request.resource.data.displayName.size() > 0
+          && request.resource.data.displayName.size() <= 80
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if uid == request.auth.uid && canReadGuild(guildId);
+      }
+      match /staticBoard/{boardId} {
+        allow get: if canReadGuild(guildId);
+        allow list, delete: if false;
+        allow create, update: if boardId == 'board' && canManageGuild(guildId)
+          && request.resource.data.keys().hasOnly(['teams', 'boardEditId', 'updatedAt'])
+          && request.resource.data.teams is map
+          && request.resource.data.teams.mode == 'guild-league'
+          && request.resource.data.boardEditId is string
+          && request.resource.data.updatedAt == request.time;
+      }
     }
     // Legacy global collections and all other paths are inaccessible.
     match /{document=**} { allow read, write: if false; }

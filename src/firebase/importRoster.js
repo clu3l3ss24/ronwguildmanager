@@ -1,5 +1,5 @@
 import { collection, doc, getDoc, getDocs, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { blankBoard, normalizeBoard, serializeBoard } from './board.js';
+import { blankBoard, blankStaticBoard, normalizeBoard, serializeBoard } from './board.js';
 import { formationMemberNames } from './teams.js';
 
 export function prepareRosterImport(roster, existingMembers) {
@@ -17,7 +17,7 @@ export function prepareRosterImport(roster, existingMembers) {
 }
 
 export async function replaceGuildRoster(db, guildId, roster) {
-  const [current, guild, saves] = await Promise.all([getDocs(collection(db, 'guilds', guildId, 'members')), getDoc(doc(db, 'guilds', guildId)), getDocs(collection(db, 'guilds', guildId, 'savedTeams'))]);
+  const [current, guild, saves, teamBoards] = await Promise.all([getDocs(collection(db, 'guilds', guildId, 'members')), getDoc(doc(db, 'guilds', guildId)), getDocs(collection(db, 'guilds', guildId, 'savedTeams')), getDocs(collection(db, 'guilds', guildId, 'teamBoards'))]);
   const previousMembers = current.docs.map(item => ({ ...item.data(), id: item.id }));
   const prepared = prepareRosterImport(roster, previousMembers);
   const retained = new Set(prepared.members.map(member => member.id));
@@ -32,10 +32,15 @@ export async function replaceGuildRoster(db, guildId, roster) {
   current.docs.filter(item => !retained.has(item.id)).forEach(item => batch.delete(item.ref));
   prepared.members.forEach(member => batch.set(doc(db, 'guilds', guildId, 'members', member.id), member));
   const boardEditId = crypto.randomUUID();
-  batch.update(doc(db, 'guilds', guildId), { teams: serializeBoard(blankBoard(normalizeBoard(guild.data()?.teams).mode)), boardEditId, updatedAt: serverTimestamp() });
-  // Roster replacement and board reset succeed together or leave both unchanged.
+  const boardMode = normalizeBoard(guild.data()?.teams).mode;
+  teamBoards.docs.filter(item => item.id !== '_meta').forEach(item => batch.delete(item.ref));
+  batch.set(doc(db, 'guilds', guildId, 'teamBoards', '_meta'), { mode: boardMode, schemaVersion: 1, updatedAt: serverTimestamp() });
+  batch.update(doc(db, 'guilds', guildId), { teams: serializeBoard(blankBoard(boardMode)), boardEditId, updatedAt: serverTimestamp() });
+  const staticBoardEditId = crypto.randomUUID();
+  batch.set(doc(db, 'guilds', guildId, 'staticBoard', 'board'), { teams: serializeBoard(blankStaticBoard()), boardEditId: staticBoardEditId, updatedAt: serverTimestamp() });
+  // Roster replacement and both board resets succeed together or leave all unchanged.
   await batch.commit();
-  return { added: prepared.members.length, duplicates: prepared.duplicates, boardEditId };
+  return { added: prepared.members.length, duplicates: prepared.duplicates, boardEditId, staticBoardEditId };
 }
 
 export function describeImportError(error) {
