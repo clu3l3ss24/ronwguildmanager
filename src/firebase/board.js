@@ -1,4 +1,4 @@
-import { roleForClass } from '../utils/classRoles.js';
+import { isPreferredPerformer, roleForClass } from '../utils/classRoles.js';
 
 export const BOARD_MODES = {
   'guild-league': { name: 'Guild League', players: 60 },
@@ -120,14 +120,17 @@ export function autoBalanceBoard(members, value, status = 'all', preferences = n
   const available = sortMembersByGearScore(members.filter(member => !assigned.has(member.id) && matchesMemberStatus(member, status)));
   const byId = new Map(members.map(member => [member.id, member]));
   let remaining = BOARD_MODES[next.mode].players - assigned.size;
-  if (preferences) {
+  const allAny = status === 'all' && preferences?.every(preference => preference.role === 'any' && !preference.job);
+  if (preferences && !allAny) {
     const normalizeJob = name => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const vacancies = Object.values(next.teams).flatMap(parties => parties.flatMap(slots => slots.flatMap((id, index) => id ? [] : [{ slots, index, preference: preferences[index] || { role: 'any', job: '' } }])));
     // Reserve scarce matches before unrestricted slots can consume them.
     vacancies.sort((a, b) => (b.preference.job ? 2 : b.preference.role !== 'any' ? 1 : 0) - (a.preference.job ? 2 : a.preference.role !== 'any' ? 1 : 0));
     for (const { slots, index, preference } of vacancies) {
       if (remaining <= 0) break;
-      const candidate = available.findIndex(member => (preference.role === 'any' || combatRole(member) === preference.role) && (!preference.job || normalizeJob(member.className) === normalizeJob(preference.job)));
+      const matches = member => (preference.role === 'any' || combatRole(member) === preference.role) && (!preference.job || normalizeJob(member.className) === normalizeJob(preference.job));
+      let candidate = available.findIndex(member => matches(member) && (preference.role !== 'performer' || preference.job || isPreferredPerformer(member.className)));
+      if (candidate < 0 && preference.role === 'performer' && !preference.job) candidate = available.findIndex(matches);
       if (candidate < 0) continue;
       slots[index] = available.splice(candidate, 1)[0].id;
       remaining -= 1;
@@ -135,14 +138,15 @@ export function autoBalanceBoard(members, value, status = 'all', preferences = n
     return next;
   }
   for (const parties of Object.values(next.teams)) for (const slots of parties) {
-    const counts = { tank: 0, healer: 0, dps: 0 };
+    const counts = { tank: 0, healer: 0, performer: 0, dps: 0 };
     slots.filter(Boolean).forEach(id => { counts[combatRole(byId.get(id))] += 1; });
     for (let index = 0; index < slots.length; index += 1) {
       if (slots[index] || !available.length || remaining <= 0) continue;
-      const needed = ['tank', 'healer', 'dps'].filter(role => counts[role] < (role === 'dps' ? 3 : 1));
+      const needed = ['tank', 'healer', 'performer', 'dps'].filter(role => counts[role] < (role === 'dps' ? 2 : 1));
       let candidate = -1;
       for (const role of needed) {
-        candidate = available.findIndex(member => combatRole(member) === role);
+        if (role === 'performer') candidate = available.findIndex(member => combatRole(member) === role && isPreferredPerformer(member.className));
+        if (candidate < 0) candidate = available.findIndex(member => combatRole(member) === role);
         if (candidate >= 0) break;
       }
       const [member] = available.splice(candidate < 0 ? 0 : candidate, 1);
