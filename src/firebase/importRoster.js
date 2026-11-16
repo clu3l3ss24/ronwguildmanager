@@ -22,7 +22,8 @@ export async function replaceGuildRoster(db, guildId, roster) {
   const previousMembers = current.docs.map(item => ({ ...item.data(), id: item.id }));
   const prepared = prepareRosterImport(roster, previousMembers);
   const staticBoard = normalizeStaticBoard(savedStatic.exists() ? savedStatic.data().teams : blankStaticBoard());
-  const reconciledStatic = prepareFormation(staticBoard.teams, prepared.members, staticBoard.groupNames, staticBoard.teamNames);
+  const previousStaticNames = formationMemberNames(staticBoard.teams, previousMembers);
+  const reconciledStatic = prepareFormation(staticBoard.teams, prepared.members, staticBoard.groupNames, staticBoard.teamNames, previousStaticNames);
   const nextStatic = { ...staticBoard, teams: reconciledStatic.teams };
   const retained = new Set(prepared.members.map(member => member.id));
   const batch = writeBatch(db);
@@ -44,7 +45,7 @@ export async function replaceGuildRoster(db, guildId, roster) {
   batch.set(staticRef, { teams: serializeBoard(nextStatic), boardEditId: staticBoardEditId, updatedAt: serverTimestamp() });
   // Roster replacement, event-board reset and static-member reconciliation are atomic.
   await batch.commit();
-  return { added: prepared.members.length, duplicates: prepared.duplicates, boardEditId, staticBoardEditId, staticBoard: nextStatic };
+  return { added: prepared.members.length, duplicates: prepared.duplicates, boardEditId, staticBoardEditId, staticBoard: nextStatic, removedStaticMembers: reconciledStatic.removedMembers };
 }
 
 export function describeImportError(error) {

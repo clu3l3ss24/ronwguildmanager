@@ -131,14 +131,23 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
         setSavedTeams(current => current.map(snapshot => ({ ...snapshot, memberNames: formationMemberNames(snapshot.teams, members, snapshot.memberNames) })));
         setMembers(prepared.members); const cleared = blankBoard(board.mode); boardRef.current = cleared; setBoard(cleared);
         const currentStatic = normalizeStaticBoard(staticBoardRef.current);
-        const reconciledStatic = prepareFormation(currentStatic.teams, prepared.members, currentStatic.groupNames, currentStatic.teamNames);
+        const previousStaticNames = formationMemberNames(currentStatic.teams, members);
+        const reconciledStatic = prepareFormation(currentStatic.teams, prepared.members, currentStatic.groupNames, currentStatic.teamNames, previousStaticNames);
         const nextStatic = { ...currentStatic, teams: reconciledStatic.teams };
-        result = { added: prepared.members.length, duplicates: prepared.duplicates, staticBoard: nextStatic };
+        result = { added: prepared.members.length, duplicates: prepared.duplicates, staticBoard: nextStatic, removedStaticMembers: reconciledStatic.removedMembers };
       }
       const nextStatic = normalizeStaticBoard(result.staticBoard || staticBoardRef.current);
       localStaticEditRef.current = result.staticBoardEditId || null;
       staticBoardRef.current = nextStatic; staticBoardVersionRef.current = result.staticBoardEditId || null; setStaticBoard(nextStatic); setStaticDraft(nextStatic);
-      setError(''); setNotice(''); return result;
+      setError('');
+      if (result.removedStaticMembers?.length) {
+        const removedNames = [...new Set(result.removedStaticMembers.map(member => member.name).filter(Boolean))];
+        const visibleNames = removedNames.slice(0, 5).join(', ');
+        const extraCount = removedNames.length - Math.min(removedNames.length, 5);
+        const who = visibleNames ? `${visibleNames}${extraCount > 0 ? ` and ${extraCount} more` : ''}` : `${result.removedStaticMembers.length} member${result.removedStaticMembers.length === 1 ? '' : 's'}`;
+        setNotice(`Removed ${who} from saved Static parties because they were missing from the uploaded CSV. The party list was kept.`);
+      }
+      return result;
     } finally { operationRef.current = false; setBusy(false); }
   };
   const reportFailure = () => setError('Your change could not be saved. Check your connection and try again.');
