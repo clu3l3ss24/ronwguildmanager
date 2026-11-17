@@ -34,6 +34,7 @@ export function buildRosterAnalytics(members) {
   const gear = [];
   const weekly = [];
   const lifetime = [];
+  const gearMembers = [];
   let highestGear = null;
   let lowestGear = null;
 
@@ -51,6 +52,7 @@ export function buildRosterAnalytics(members) {
     const gearScore = numeric(member.gearScore);
     if (gearScore !== null) {
       const player = { name: member.ign, score: gearScore };
+      gearMembers.push({ ...player, className });
       gear.push(gearScore);
       classRow.gearScores.push(gearScore);
       if (!highestGear || gearScore > highestGear.score) highestGear = player;
@@ -72,6 +74,8 @@ export function buildRosterAnalytics(members) {
     .sort((a, b) => byDescending('count', a, b));
   weekly.sort((a, b) => byDescending('score', a, b));
   lifetime.sort((a, b) => byDescending('score', a, b));
+  const highestGearRanking = [...gearMembers].sort((a, b) => byDescending('score', a, b));
+  const lowestGearRanking = [...gearMembers].sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
   const gearDistribution = distribution(gear);
   const sum = values => values.reduce((total, item) => total + item.score, 0);
 
@@ -83,6 +87,8 @@ export function buildRosterAnalytics(members) {
     gearCount: gear.length,
     weeklyContribution: { total: weekly.length ? sum(weekly) : null, count: weekly.length, top10: weekly.slice(0, 10) },
     lifetimeContribution: { total: lifetime.length ? sum(lifetime) : null, count: lifetime.length, top10: lifetime.slice(0, 10) },
+    highestGearRanking: { count: gearMembers.length, top10: highestGearRanking.slice(0, 10) },
+    lowestGearRanking: { count: gearMembers.length, top10: lowestGearRanking.slice(0, 10) },
     highestGear,
     lowestGear,
     classes: classRows,

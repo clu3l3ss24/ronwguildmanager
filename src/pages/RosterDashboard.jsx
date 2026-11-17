@@ -80,16 +80,22 @@ function GearDistribution({ distribution }) {
 }
 
 function Ranking({ metric }) {
-  return <div className="rd-table-wrap"><table><thead><tr><th>#</th><th>PLAYER</th><th>CLASS</th><th>CONTRIBUTION</th></tr></thead><tbody>
-    {metric.top10.map((member, index) => <tr key={`${member.name}-${index}`}><td className="rd-rank">{index + 1}</td><td>{member.name}</td><td>{member.className}</td><td>{whole(member.score)}</td></tr>)}
-    {!metric.top10.length && <tr><td colSpan="4" className="rd-empty-cell">No contribution data is available.</td></tr>}
+  return <div className="rd-table-wrap"><table><thead><tr><th>#</th><th>PLAYER</th><th>CLASS</th><th>{metric.valueLabel}</th></tr></thead><tbody>
+    {metric.top10.map((member, index) => <tr key={`${member.name}-${index}`}><td className="rd-rank">{index + 1}</td><td>{member.name}</td><td><span className="rd-class-name"><JobIcon className={member.className}/>{member.className}</span></td><td>{whole(member.score)}</td></tr>)}
+    {!metric.top10.length && <tr><td colSpan="4" className="rd-empty-cell">{metric.emptyMessage}</td></tr>}
   </tbody></table></div>;
 }
 
 export default function RosterDashboard({ members }) {
-  const [contribution, setContribution] = useState('weekly');
+  const [rankingMode, setRankingMode] = useState('weekly');
   const analytics = useMemo(() => buildRosterAnalytics(members), [members]);
-  const currentContribution = contribution === 'weekly' ? analytics.weeklyContribution : analytics.lifetimeContribution;
+  const rankings = {
+    weekly: { ...analytics.weeklyContribution, title: 'Weekly Contribution Ranking', valueLabel: 'WEEKLY', summary: `${whole(analytics.weeklyContribution.total)} TOTAL`, emptyMessage: 'No weekly contribution data is available.' },
+    lifetime: { ...analytics.lifetimeContribution, title: 'Lifetime Contribution Ranking', valueLabel: 'LIFETIME', summary: `${whole(analytics.lifetimeContribution.total)} TOTAL`, emptyMessage: 'No lifetime contribution data is available.' },
+    highestGear: { ...analytics.highestGearRanking, title: 'Highest GR Ranking', valueLabel: 'GR', summary: `${analytics.gearCount} SCORED MEMBERS`, emptyMessage: 'No gear score data is available.' },
+    lowestGear: { ...analytics.lowestGearRanking, title: 'Lowest GR Ranking', valueLabel: 'GR', summary: `${analytics.gearCount} SCORED MEMBERS`, emptyMessage: 'No gear score data is available.' },
+  };
+  const currentRanking = rankings[rankingMode];
   return <main className="page wide rd-page">
     <div className="page-title rd-title"><h1>Guild dashboard</h1><p>Guild statistics, classes, and contributions based on your latest roster.</p></div>
     <div className="rd-metrics">
@@ -102,7 +108,14 @@ export default function RosterDashboard({ members }) {
     </div>
     {!members.length && <section className="rd-empty-banner"><strong>Your dashboard is ready for a roster.</strong><span>Upload a CSV from Overview to see guild statistics and member rankings here.</span></section>}
     <div className="rd-top-grid"><Breakdown title="Title Distribution" icon="level" rows={analytics.titles} countLabel="TITLES" total={analytics.totalMembers} isTitles/><Breakdown title="Class Composition" icon="gear" rows={analytics.classes} countLabel="CLASSES" total={analytics.totalMembers}/></div>
-    <div className="rd-bottom-grid"><section className="rd-panel rd-ranking"><div className="rd-tabs"><button className={contribution === 'weekly' ? 'selected' : ''} aria-pressed={contribution === 'weekly'} onClick={() => setContribution('weekly')}>Weekly Contribution</button><button className={contribution === 'lifetime' ? 'selected' : ''} aria-pressed={contribution === 'lifetime'} onClick={() => setContribution('lifetime')}>Lifetime Contribution</button></div><header className="rd-panel-heading"><h2>🏆 {contribution === 'weekly' ? 'Weekly' : 'Lifetime'} Contribution Ranking (Top 10)</h2><span>{whole(currentContribution.total)} TOTAL</span></header><Ranking metric={currentContribution}/></section>
+    <div className="rd-bottom-grid">
+      <section className="rd-panel rd-ranking">
+        <div className="rd-tabs" role="group" aria-label="Member rankings">
+          {[["weekly", "Weekly Contribution"], ["lifetime", "Lifetime Contribution"], ["highestGear", "Top 10 Highest GR"], ["lowestGear", "Top 10 Lowest GR"]].map(([key, label]) => <button key={key} className={rankingMode === key ? 'selected' : ''} aria-pressed={rankingMode === key} onClick={() => setRankingMode(key)}>{label}</button>)}
+        </div>
+        <header className="rd-panel-heading"><h2>🏆 {currentRanking.title} (Top 10)</h2><span>{currentRanking.summary}</span></header>
+        <Ranking metric={currentRanking}/>
+      </section>
       <section className="rd-panel rd-strength"><header className="rd-panel-heading"><h2><Icon type="gear"/>Combat Strength</h2></header><div className="rd-strength-content"><div className="rd-highlights">
         <div><span><Icon type="crown"/> HIGHEST GEAR SCORE</span><strong>{whole(analytics.highestGear?.score)}</strong><small>{analytics.highestGear?.name || '—'}</small></div>
         <div><span><Icon type="members"/> GUILD AVERAGE</span><strong>{whole(analytics.averageGearScore)}</strong><small>{analytics.gearCount ? 'Roster average' : '—'}</small></div>
