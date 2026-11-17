@@ -9,12 +9,12 @@ RONW Roster Planner helps a guild keep its member roster organized, build teams 
 3. Open **Dashboard** to review roster statistics, class and title distribution, contribution rankings, and gear score distribution.
 4. Use **Team Builder** to prepare event teams, or **Static** to manage the guild's regular parties.
 
-The CSV should include a player name or IGN column. The importer also recognizes common guild export columns for level and guild position.
+CSV imports use the guild export columns `Id`, `Player`, `Lv.`, `Class`, `Title`, `Gender`, `Position`, `Gear Score`, `Weekly`, `Weekly Contribution`, `Total Contribution`, and `Online Status`. `Player` is required; blank player rows are skipped, duplicate non-empty IDs reject the file, and invalid or missing numeric values are omitted from numeric dashboard calculations.
 
 ## Features
 
 - **Overview:** Upload guild data, see roster information, and manage shared access.
-- **Dashboard:** Explore statistics and rankings calculated from the latest uploaded roster. The CSV importer recognizes player name, level, class, gear score, title, and contribution columns.
+- **Dashboard:** Explore statistics and rankings calculated from the latest uploaded roster. New classes and titles appear automatically; rankings and gear score distribution recalculate on each successful roster import.
 - **Team Builder:** Create teams and parties for Guild League, Polarity Zone, or Siege. Auto-balance fills open slots using roster status, role, job, and gear score. With all slots set to Any, it aims for one tank, one healer, one performer, and DPS in the remaining slots; Bard and Clown are preferred performers. Remove an assigned member with the slot's X button or drag them outside the party list. Dragging a member onto another occupied slot swaps the two members. Each team tab shows its total gear rating (GR). Take a clear, paged roster screenshot when the setup is ready.
 - **Static:** Keep a saved list of the guild's regular parties, separate from event teams. Changes save automatically as you add, remove, or rearrange members and parties. Remove an assigned member with the slot's X button or drag them outside the party list. Dragging a member onto another occupied slot swaps the two members. When a new CSV is uploaded, missing members are removed from their slots, while the saved parties remain available.
 - **Live Team Builder:** Guild members with access can work on the shared event board at the same time and see who else is active.

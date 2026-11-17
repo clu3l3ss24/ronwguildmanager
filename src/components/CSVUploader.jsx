@@ -1,36 +1,27 @@
 import { useRef, useState } from 'react';
 import Papa from 'papaparse';
 import { describeImportError } from '../firebase/importRoster';
-
-const value = (row, keys) => keys.map(key => row[key]).find(item => item !== undefined && String(item).trim() !== '') ?? '';
-const normalized = (row) => {
-  const ign = String(value(row, ['Player Name / IGN', 'Player', 'IGN', 'Player Name'])).trim();
-  return {
-    ign, level: value(row, ['Level', 'Lv.', 'Lv']), className: String(value(row, ['Class'])).trim() || 'Unknown',
-    gearScore: Number(String(value(row, ['Gear Score', 'GearScore'])).replace(/[^0-9.]/g, '')) || 0,
-    title: String(value(row, ['Title', 'Guild Title', 'Title Name'])).trim(),
-    gender: value(row, ['Gender']), guildPosition: value(row, ['Guild Position', 'Position']),
-    weeklyContribution: value(row, ['Weekly Contribution', 'Weekly']), totalContribution: value(row, ['Total Contribution', 'Lifetime Contribution', 'Lifetime']),
-    online: /online/i.test(String(value(row, ['Online Status', 'Status']))),
-  };
-};
+import { parseRosterCsv } from '../utils/rosterCsv';
 
 export default function CSVUploader({ onImport, canUpload }) {
-  const input = useRef(); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false); const [failed, setFailed] = useState(false);
-  const fail = error => { setFailed(true); setBusy(false); setMessage(describeImportError(error)); };
-  const importFile = file => {
-    setBusy(true); setFailed(false); setMessage('Importing roster…');
-    try { Papa.parse(file, { header: true, skipEmptyLines: true, error: fail, complete: async ({ data, errors }) => {
-    const roster = data.map(normalized).filter(member => member.ign);
-    const invalid = data.length - roster.length;
-    if (!roster.length) { setBusy(false); setFailed(true); setMessage('No valid members found. Check that the file includes Player or IGN.'); return; }
+  const input = useRef();
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const fail = error => { setFailed(true); setBusy(false); setMessage(error?.code === 'csv/invalid' ? error.message : describeImportError(error)); };
+  const importFile = async file => {
+    setBusy(true); setFailed(false); setMessage('Validating CSV…');
     try {
-      const { added, duplicates } = await onImport(roster);
-      setMessage(`${added} members imported successfully${duplicates ? ` · ${duplicates} duplicate IGN skipped` : ''}${invalid ? ` · ${invalid} incomplete row skipped` : ''}. Team Builder was reset.`);
+      const { members, warnings } = await parseRosterCsv(file, Papa);
+      setMessage('CSV validated. Importing roster…');
+      const { added, duplicates } = await onImport(members);
+      const skipped = warnings.emptyPlayerNames ? ` · ${warnings.emptyPlayerNames} empty player row${warnings.emptyPlayerNames === 1 ? '' : 's'} skipped` : '';
+      const invalidMetrics = Object.values(warnings.invalidNumericFields).reduce((sum, count) => sum + count, 0);
+      const numericNote = invalidMetrics ? ` · ${invalidMetrics} invalid numeric value${invalidMetrics === 1 ? '' : 's'} omitted from calculations` : '';
+      const duplicateNote = duplicates ? ` · ${duplicates} duplicate record${duplicates === 1 ? '' : 's'} skipped` : '';
+      setMessage(`${added} members imported successfully${duplicateNote}${skipped}${numericNote}. Team Builder was reset.`);
     } catch (error) { fail(error); }
     finally { setBusy(false); }
-    if (errors.length) console.warn('CSV parsing warnings:', errors);
-    }}); } catch (error) { fail(error); }
   };
   if (!canUpload) return <section className="upload-panel locked"><span>Roster imports are available to the workspace owner.</span></section>;
   return <section className="upload-panel">

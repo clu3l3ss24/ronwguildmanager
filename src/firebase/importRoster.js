@@ -3,15 +3,19 @@ import { blankBoard, blankStaticBoard, normalizeBoard, normalizeStaticBoard, ser
 import { formationMemberNames, prepareFormation } from './teams.js';
 
 export function prepareRosterImport(roster, existingMembers) {
-  const existing = new Map(existingMembers.map(member => [member.ign.trim().toLowerCase(), member.id]));
+  const existingByName = new Map(existingMembers.filter(member => !member.sourceId).map(member => [member.ign.trim().toLowerCase(), member.id]));
+  const existingByAnyName = new Map(existingMembers.map(member => [member.ign.trim().toLowerCase(), member.id]));
+  const existingBySourceId = new Map(existingMembers.filter(member => member.sourceId).map(member => [String(member.sourceId), member.id]));
   const seen = new Set();
   const members = [];
   for (const member of roster) {
     const ign = member.ign.trim();
-    const key = ign.toLowerCase();
+    const sourceId = String(member.sourceId || '').trim();
+    const key = sourceId ? `id:${sourceId}` : `name:${ign.toLowerCase()}`;
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    members.push({ ...member, ign, id: existing.get(key) || crypto.randomUUID() });
+    const id = sourceId ? existingBySourceId.get(sourceId) || existingByName.get(ign.toLowerCase()) : existingByAnyName.get(ign.toLowerCase());
+    members.push({ ...member, sourceId, ign, id: id || crypto.randomUUID() });
   }
   return { members, duplicates: roster.length - members.length };
 }

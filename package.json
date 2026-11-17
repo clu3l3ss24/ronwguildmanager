@@ -4,7 +4,7 @@
   "description": "Ragnarok: The New World guild roster and team planner",
   "type": "module",
   "scripts": {
-    "test": "node --test src/firebase/teams.test.js src/firebase/memberTokens.test.js src/firebase/board.test.js",
+    "test": "node --test src/firebase/teams.test.js src/firebase/memberTokens.test.js src/firebase/board.test.js src/utils/rosterCsv.test.js",
     "test:rules": "firebase emulators:exec --only firestore --project demo-ronw-tests \"node --test tests/firestore.rules.test.js\"",
     "dev": "vite",
     "build": "vite build",
