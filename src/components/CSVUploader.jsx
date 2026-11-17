@@ -8,8 +8,9 @@ const normalized = (row) => {
   return {
     ign, level: value(row, ['Level', 'Lv.', 'Lv']), className: String(value(row, ['Class'])).trim() || 'Unknown',
     gearScore: Number(String(value(row, ['Gear Score', 'GearScore'])).replace(/[^0-9.]/g, '')) || 0,
+    title: String(value(row, ['Title', 'Guild Title', 'Title Name'])).trim(),
     gender: value(row, ['Gender']), guildPosition: value(row, ['Guild Position', 'Position']),
-    weeklyContribution: value(row, ['Weekly Contribution', 'Weekly']), totalContribution: value(row, ['Total Contribution']),
+    weeklyContribution: value(row, ['Weekly Contribution', 'Weekly']), totalContribution: value(row, ['Total Contribution', 'Lifetime Contribution', 'Lifetime']),
     online: /online/i.test(String(value(row, ['Online Status', 'Status']))),
   };
 };
