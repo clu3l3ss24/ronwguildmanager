@@ -4,7 +4,7 @@ export default function Dashboard({ members, onImport, role, teams, guildId, own
   const online = members.filter(member => member.online).length; const assigned = new Set(Object.values(teams).flat(2).filter(Boolean)).size;
   return <main className="page"><div className="page-title"><p className="eyebrow">{guildName} · OVERVIEW</p><h1>Your roster, <em>organized.</em></h1><p>Keep your roster battle-ready and your squads balanced for every war.</p></div>
     <div className="metric-grid"><Metric label="Roster Players" value={members.length} note="Current roster" /><Metric label="Online Now" value={online} note="Ready for battle" accent="green" /><Metric label="Team Assigned" value={assigned} note="Across your teams" accent="purple" /><Metric label="Unassigned" value={members.length - assigned} note="Awaiting placement" accent="orange" /></div>
-    <CSVUploader onImport={onImport} canUpload={role === 'Account owner'} />
+    <CSVUploader onImport={onImport} canUpload={role !== 'Viewer'} />
     {role === 'Account owner' && <MemberTokenPanel guildId={guildId} ownerId={ownerId} sharedReadOnly={sharedReadOnly} />}
   </main>;
 }

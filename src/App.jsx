@@ -7,7 +7,7 @@ import Settings from './pages/Settings';
 import AccountGate from './components/AccountGate';
 import { formationMemberNames, prepareFormation } from './firebase/teams';
 import { autoBalanceBoard, blankBoard, blankStaticBoard, boardError, BOARD_MODES, changeBoardMode, formationSaveError, normalizeBoard, normalizeStaticBoard, serializeBoard } from './firebase/board';
-import { prepareRosterImport, replaceGuildRoster } from './firebase/importRoster';
+import { prepareRosterImport, reconcileSavedFormation, replaceGuildRoster } from './firebase/importRoster';
 
 const seedMembers = [];
 const stored = key => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
@@ -27,6 +27,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
     apply(); media.addEventListener('change', apply); return () => media.removeEventListener('change', apply);
   }, [theme]);
   const tokenPermission = guild?.tokenPermission;
+  const memberTokenSession = Boolean(user?.isAnonymous);
   guild = workspace;
   role = user?.isAnonymous ? ((tokenPermission || (guild?.sharedReadOnly ? 'view' : 'edit')) === 'view' ? 'Viewer' : 'Collaborator') : 'Account owner';
   const [startPage, setStartPage] = useState(() => { const saved = localStorage.getItem('ronw-start-page'); return ['dashboard', 'members', 'teams', 'static'].includes(saved) ? saved : 'dashboard'; });
@@ -120,32 +121,43 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   useEffect(() => { const interval = setInterval(() => setPresenceClock(Date.now()), 10000); return () => clearInterval(interval); }, []);
   const activeTeamBuilderUsers = presenceDocs.filter(item => { const updatedAt = item.updatedAt?.toMillis?.(); return updatedAt && presenceClock - updatedAt < 45000; }).map(item => item.displayName);
   const importMembers = async roster => {
-    if (role !== 'Account owner') throw Object.assign(new Error(), { code: 'permission-denied' });
+    if (role === 'Viewer') throw Object.assign(new Error(), { code: 'permission-denied' });
     if (operationRef.current) throw Object.assign(new Error(), { code: 'import/busy' });
     operationRef.current = true; setBusy(true);
     try {
       let result;
+      let removedSavedMembers = [];
+      let removedActiveMembers = [];
       if (firebaseEnabled) result = await replaceGuildRoster(db, guildId, roster);
       else {
         const prepared = prepareRosterImport(roster, members);
-        setSavedTeams(current => current.map(snapshot => ({ ...snapshot, memberNames: formationMemberNames(snapshot.teams, members, snapshot.memberNames) })));
+        const reconciledSaves = savedTeams.map(snapshot => {
+          const reconciled = reconcileSavedFormation(snapshot, prepared.members, members, snapshot.memberNames);
+          removedSavedMembers.push(...reconciled.removedMembers.map(member => ({ ...member, formationName: snapshot.name || 'Saved formation' })));
+          return { ...snapshot, ...reconciled.board, memberNames: reconciled.memberNames };
+        });
+        setSavedTeams(reconciledSaves);
+        const reconciledActive = reconcileSavedFormation(boardRef.current, prepared.members, members);
+        removedActiveMembers = reconciledActive.removedMembers.map(member => ({ ...member, formationName: 'Active Team Builder' }));
         setMembers(prepared.members); const cleared = blankBoard(board.mode); boardRef.current = cleared; setBoard(cleared);
         const currentStatic = normalizeStaticBoard(staticBoardRef.current);
         const previousStaticNames = formationMemberNames(currentStatic.teams, members);
         const reconciledStatic = prepareFormation(currentStatic.teams, prepared.members, currentStatic.groupNames, currentStatic.teamNames, previousStaticNames);
         const nextStatic = { ...currentStatic, teams: reconciledStatic.teams };
-        result = { added: prepared.members.length, duplicates: prepared.duplicates, staticBoard: nextStatic, removedStaticMembers: reconciledStatic.removedMembers };
+        result = { added: prepared.members.length, duplicates: prepared.duplicates, staticBoard: nextStatic, removedStaticMembers: reconciledStatic.removedMembers, removedSavedMembers, removedActiveMembers };
       }
       const nextStatic = normalizeStaticBoard(result.staticBoard || staticBoardRef.current);
       localStaticEditRef.current = result.staticBoardEditId || null;
       staticBoardRef.current = nextStatic; staticBoardVersionRef.current = result.staticBoardEditId || null; setStaticBoard(nextStatic); setStaticDraft(nextStatic);
       setError('');
-      if (result.removedStaticMembers?.length) {
-        const removedNames = [...new Set(result.removedStaticMembers.map(member => member.name).filter(Boolean))];
-        const visibleNames = removedNames.slice(0, 5).join(', ');
-        const extraCount = removedNames.length - Math.min(removedNames.length, 5);
-        const who = visibleNames ? `${visibleNames}${extraCount > 0 ? ` and ${extraCount} more` : ''}` : `${result.removedStaticMembers.length} member${result.removedStaticMembers.length === 1 ? '' : 's'}`;
-        setNotice(`Removed ${who} from saved Static parties because they were missing from the uploaded CSV. The party list was kept.`);
+      const removals = [
+        ...(result.removedActiveMembers || []).map(member => ({ ...member, source: `${member.formationName} · ${member.side}` })),
+        ...(result.removedSavedMembers || []).map(member => ({ ...member, source: `${member.formationName} · ${member.side}` })),
+        ...(result.removedStaticMembers || []).map(member => ({ ...member, source: 'Static' })),
+      ];
+      if (removals.length) {
+        const details = removals.map(member => `${member.name || 'Unknown member'} from ${member.source} / ${member.team} / ${member.party}`).join('; ');
+        setNotice(`Roster import removed ${removals.length} saved party assignment${removals.length === 1 ? '' : 's'}: ${details}.`);
       }
       return result;
     } finally { operationRef.current = false; setBusy(false); }
@@ -236,7 +248,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
     } finally { operationRef.current = false; setBusy(false); }
   };
   const deleteMember = async id => {
-    if (role !== 'Account owner' || operationRef.current) return;
+    if (role === 'Viewer' || operationRef.current) return;
     const next = Object.fromEntries(Object.entries(teams).map(([key, parties]) => [key, parties.map(slots => slots.map(item => item === id ? null : item))]));
     const cleanedStatic = normalizeStaticBoard({ ...staticBoardRef.current, teams: Object.fromEntries(Object.entries(staticBoardRef.current.teams).map(([key, parties]) => [key, parties.map(slots => slots.map(item => item === id ? null : item))])) });
     if (!firebaseEnabled) { setMembers(current => current.filter(member => member.id !== id)); const cleaned = { ...boardRef.current, teams: next }; boardRef.current = cleaned; setBoard(cleaned); staticBoardRef.current = cleanedStatic; setStaticBoard(cleanedStatic); setStaticDraft(cleanedStatic); return; }
@@ -347,8 +359,9 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
     try { if (firebaseEnabled) await deleteDoc(doc(db, 'guilds', guildId, 'savedTeams', id)); else setSavedTeams(current => current.filter(snapshot => snapshot.id !== id)); setError(''); setNotice('Saved formation deleted. The active board is unchanged.'); return true; } catch { reportFailure(); return false; }
     finally { operationRef.current = false; setBusy(false); }
   };
-  const active = page === 'settings' ? <Settings user={user} guild={guild} members={members} board={board} staticBoard={staticBoard} savedTeams={savedTeams} onWorkspaceChange={setWorkspace} onLogout={() => logout()} theme={theme} setTheme={setTheme} startPage={startPage} setStartPage={setStartPage} /> : page === 'dashboard' ? <Dashboard sharedReadOnly={guild?.sharedReadOnly || false} guildId={guildId} ownerId={guild?.ownerId} guildName={guild?.name || 'Local demo'} members={members} teams={teams} onImport={importMembers} role={role} /> : page === 'members' ? <RosterDashboard members={members} /> : page === 'static' ? <Teams staticOnly guildName={guild?.name || 'Local demo'} members={members} teams={staticDraft.teams} mode="guild-league" teamNames={staticDraft.teamNames} groupNames={staticDraft.groupNames} onTeamsChange={updateStaticDraft} editable={role !== 'Viewer'} generate={autoBalanceStatic} clear={clearStaticTeams} busy={busy} /> : <Teams guildName={guild?.name || 'Local demo'} members={members} teams={teams} mode={board.mode} teamNames={board.teamNames} groupNames={board.groupNames} board={board} staticParties={staticBoard.teams} staticPartyNames={staticBoard.teamNames} activeUsers={activeTeamBuilderUsers} selectMode={selectMode} onTeamsChange={saveTeams} editable={role !== 'Viewer'} generate={autoBalance} clear={clearTeams} save={saveTeam} activeSaveId={activeSaveId} savedTeams={savedTeams} load={loadTeam} deleteSaved={deleteSavedTeam} busy={busy} />;
+  const safePage = memberTokenSession && page === 'settings' ? 'dashboard' : page;
+  const active = safePage === 'settings' ? <Settings user={user} guild={guild} members={members} board={board} staticBoard={staticBoard} savedTeams={savedTeams} onWorkspaceChange={setWorkspace} onLogout={() => logout()} theme={theme} setTheme={setTheme} startPage={startPage} setStartPage={setStartPage} /> : safePage === 'dashboard' ? <Dashboard sharedReadOnly={guild?.sharedReadOnly || false} guildId={guildId} ownerId={guild?.ownerId} guildName={guild?.name || 'Local demo'} members={members} teams={teams} onImport={importMembers} role={role} /> : safePage === 'members' ? <RosterDashboard members={members} /> : safePage === 'static' ? <Teams staticOnly guildName={guild?.name || 'Local demo'} members={members} teams={staticDraft.teams} mode="guild-league" teamNames={staticDraft.teamNames} groupNames={staticDraft.groupNames} onTeamsChange={updateStaticDraft} editable={role !== 'Viewer'} generate={autoBalanceStatic} clear={clearStaticTeams} busy={busy} /> : <Teams guildName={guild?.name || 'Local demo'} members={members} teams={teams} mode={board.mode} teamNames={board.teamNames} groupNames={board.groupNames} board={board} staticParties={staticBoard.teams} staticPartyNames={staticBoard.teamNames} activeUsers={activeTeamBuilderUsers} selectMode={selectMode} onTeamsChange={saveTeams} editable={role !== 'Viewer'} generate={autoBalance} clear={clearTeams} save={saveTeam} activeSaveId={activeSaveId} savedTeams={savedTeams} load={loadTeam} deleteSaved={deleteSavedTeam} busy={busy} />;
   const logout = async () => { try { if (firebaseEnabled) await signOut(auth); else exitDemo(); } catch { setError('Could not sign out. Please try again.'); } };
-  return <div className="workspace-frame"><Navbar page={page} setPage={setPage} role={role} memberCount={members.length} user={user} guild={guild} onLogout={logout} notifications={notifications} clearNotifications={() => setNotifications([])} /><div className="app-shell">{!firebaseEnabled && <p className="demo-banner">Local demo — data stays in this browser. No online account is created.</p>}{error && <p className="workspace-error" role="alert">{error}</p>}{loaded ? active : <p className="workspace-loading" role="status">Loading your workspace…</p>}</div></div>;
+  return <div className="workspace-frame"><Navbar page={safePage} setPage={setPage} role={role} memberCount={members.length} user={user} guild={guild} onLogout={logout} hideSettings={memberTokenSession} notifications={notifications} clearNotifications={() => setNotifications([])} /><div className="app-shell">{!firebaseEnabled && <p className="demo-banner">Local demo — data stays in this browser. No online account is created.</p>}{error && <p className="workspace-error" role="alert">{error}</p>}{loaded ? active : <p className="workspace-loading" role="status">Loading your workspace…</p>}</div></div>;
 }
 
