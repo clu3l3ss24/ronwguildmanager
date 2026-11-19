@@ -33,7 +33,19 @@ export function normalizeBoard(value) {
   const legacyCount = Object.values(teams).flat().length;
   const candidateMode = value?.mode || raw.mode;
   const mode = Object.hasOwn(BOARD_MODES, candidateMode) ? candidateMode : legacyCount > 12 ? 'siege' : 'guild-league';
-  return { teams, mode, teamNames, groupNames };
+  const rawSub = value?.sub || raw.sub;
+  let sub = null;
+  if (rawSub) {
+    if (rawSub.teams && !Array.isArray(rawSub.groups)) {
+      sub = { teams: Object.fromEntries(Object.entries(rawSub.teams).map(([id, parties]) => [id, parties.map(party => [...party])])), teamNames: rawSub.teamNames || {}, groupNames: rawSub.groupNames || {} };
+    } else {
+    const groups = Array.isArray(rawSub.groups) ? rawSub.groups : [];
+    const subTeams = {}, subTeamNames = {}, subGroupNames = {};
+    groups.forEach(group => { if (!group?.id) return; subTeams[group.id] = (group.parties || []).map(party => [...(party.slots || [])]); subTeamNames[group.id] = (group.parties || []).map(party => String(party.name || '')); subGroupNames[group.id] = String(group.name || ''); });
+    sub = { teams: subTeams, teamNames: subTeamNames, groupNames: subGroupNames };
+    }
+  }
+  return { teams, mode, teamNames, groupNames, sub, ...(Number.isFinite(value?.capacity) ? { capacity: value.capacity } : {}) };
 }
 
 export const blankBoard = (mode = 'guild-league') => normalizeBoard({ teams: {}, mode });
@@ -57,7 +69,8 @@ export function normalizeStaticBoard(value) {
 // This uses the same guild document permissions as previous formations.
 export function serializeBoard(value) {
   const board = normalizeBoard(value);
-  return { mode: board.mode, schemaVersion: 2, groups: Object.keys(board.teams).map(id => ({ id, name: board.groupNames[id], parties: board.teams[id].map((slots, index) => ({ slots, name: board.teamNames[id][index] })) })) };
+  const groups = teams => Object.keys(teams.teams).map(id => ({ id, name: teams.groupNames[id], parties: teams.teams[id].map((slots, index) => ({ slots, name: teams.teamNames[id][index] })) }));
+  return { mode: board.mode, schemaVersion: 2, groups: groups(board), sub: board.sub ? { groups: groups(board.sub) } : null };
 }
 
 export function boardError(value) {
@@ -119,7 +132,7 @@ export function autoBalanceBoard(members, value, status = 'all', preferences = n
   const assigned = new Set(Object.values(next.teams).flat(2).filter(Boolean));
   const available = sortMembersByGearScore(members.filter(member => !assigned.has(member.id) && matchesMemberStatus(member, status)));
   const byId = new Map(members.map(member => [member.id, member]));
-  let remaining = BOARD_MODES[next.mode].players - assigned.size;
+  let remaining = (next.capacity || BOARD_MODES[next.mode].players) - assigned.size;
   const allAny = status === 'all' && preferences?.every(preference => preference.role === 'any' && !preference.job);
   if (preferences && !allAny) {
     const normalizeJob = name => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');

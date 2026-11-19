@@ -13,7 +13,7 @@ const seedMembers = [];
 const stored = key => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
 const boardMetaId = '_meta';
 const teamRecord = (value, id) => { const groups = serializeBoard(value).groups; const index = groups.findIndex(group => group.id === id); return index < 0 ? null : { ...groups[index], order: index }; };
-const boardFromTeamDocs = (snap, fallbackMode) => normalizeBoard({ mode: snap.docs.find(item => item.id === boardMetaId)?.data().mode || fallbackMode, teams: { groups: snap.docs.filter(item => item.id !== boardMetaId).sort((a, b) => (a.data().order ?? Number.MAX_SAFE_INTEGER) - (b.data().order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id)).map(item => ({ id: item.id, name: item.data().name || '', parties: item.data().parties || [] })) } });
+const boardFromTeamDocs = (snap, fallbackMode) => { const meta = snap.docs.find(item => item.id === boardMetaId)?.data() || {}; return normalizeBoard({ mode: meta.mode || fallbackMode, sub: meta.sub, teams: { groups: snap.docs.filter(item => item.id !== boardMetaId).sort((a, b) => (a.data().order ?? Number.MAX_SAFE_INTEGER) - (b.data().order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id)).map(item => ({ id: item.id, name: item.data().name || '', parties: item.data().parties || [] })) } }); };
 export default function App() {
   return <AccountGate>{session => <GuildWorkspace key={`${session.user?.uid || 'local-demo'}:${session.guild?.id || ''}`} {...session} />}</AccountGate>;
 }
@@ -161,7 +161,8 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
     const ids = new Set([...Object.keys(before.teams), ...Object.keys(updated.teams)]);
     const changedIds = [...ids].filter(id => JSON.stringify(teamRecord(before, id)) !== JSON.stringify(teamRecord(updated, id)));
     const modeChanged = before.mode !== updated.mode;
-    if (!changedIds.length && !modeChanged) return true;
+    const subChanged = JSON.stringify(before.sub) !== JSON.stringify(updated.sub);
+    if (!changedIds.length && !modeChanged && !subChanged) return true;
     operationRef.current = true; setBusy(true); setNotice('');
     try {
       if (firebaseEnabled) await runTransaction(db, async transaction => {
@@ -186,12 +187,13 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
           if (!record) transaction.delete(ref);
           else transaction.set(ref, { name: record.name, parties: record.parties, order: record.order, updatedAt: serverTimestamp() });
         }
-        if (modeChanged) transaction.update(metaRef, { mode: updated.mode, updatedAt: serverTimestamp() });
+        if (modeChanged || subChanged) transaction.update(metaRef, { ...(modeChanged ? { mode: updated.mode } : {}), ...(subChanged ? { sub: updated.sub ? { groups: Object.keys(updated.sub.teams).map(id => ({ id, name: updated.sub.groupNames[id], parties: updated.sub.teams[id].map((slots, index) => ({ slots, name: updated.sub.teamNames[id]?.[index] || '' })) })) } : null } : {}), updatedAt: serverTimestamp() });
       });
       if (!firebaseEnabled) { boardRef.current = updated; setBoard(updated); }
       setError(''); return true;
     } catch (failure) {
       if (failure.code === 'formation/conflict') setError('Someone changed this team or battle mode while you were editing. The latest board is syncing; try that change again.');
+      else if (failure.code === 'permission-denied') setError('Firestore rejected this board update. Deploy the updated firestore.rules to allow Guild League SUB lineups, then try again.');
       else reportFailure();
       return false;
     } finally { operationRef.current = false; setBusy(false); }
@@ -345,7 +347,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
     try { if (firebaseEnabled) await deleteDoc(doc(db, 'guilds', guildId, 'savedTeams', id)); else setSavedTeams(current => current.filter(snapshot => snapshot.id !== id)); setError(''); setNotice('Saved formation deleted. The active board is unchanged.'); return true; } catch { reportFailure(); return false; }
     finally { operationRef.current = false; setBusy(false); }
   };
-  const active = page === 'settings' ? <Settings user={user} guild={guild} members={members} board={board} staticBoard={staticBoard} savedTeams={savedTeams} onWorkspaceChange={setWorkspace} onLogout={() => logout()} theme={theme} setTheme={setTheme} startPage={startPage} setStartPage={setStartPage} /> : page === 'dashboard' ? <Dashboard sharedReadOnly={guild?.sharedReadOnly || false} guildId={guildId} ownerId={guild?.ownerId} guildName={guild?.name || 'Local demo'} members={members} teams={teams} onImport={importMembers} role={role} /> : page === 'members' ? <RosterDashboard members={members} /> : page === 'static' ? <Teams staticOnly guildName={guild?.name || 'Local demo'} members={members} teams={staticDraft.teams} mode="guild-league" teamNames={staticDraft.teamNames} groupNames={staticDraft.groupNames} onTeamsChange={updateStaticDraft} editable={role !== 'Viewer'} generate={autoBalanceStatic} clear={clearStaticTeams} busy={busy} /> : <Teams guildName={guild?.name || 'Local demo'} members={members} teams={teams} mode={board.mode} teamNames={board.teamNames} groupNames={board.groupNames} staticParties={staticBoard.teams} staticPartyNames={staticBoard.teamNames} activeUsers={activeTeamBuilderUsers} selectMode={selectMode} onTeamsChange={saveTeams} editable={role !== 'Viewer'} generate={autoBalance} clear={clearTeams} save={saveTeam} activeSaveId={activeSaveId} savedTeams={savedTeams} load={loadTeam} deleteSaved={deleteSavedTeam} busy={busy} />;
+  const active = page === 'settings' ? <Settings user={user} guild={guild} members={members} board={board} staticBoard={staticBoard} savedTeams={savedTeams} onWorkspaceChange={setWorkspace} onLogout={() => logout()} theme={theme} setTheme={setTheme} startPage={startPage} setStartPage={setStartPage} /> : page === 'dashboard' ? <Dashboard sharedReadOnly={guild?.sharedReadOnly || false} guildId={guildId} ownerId={guild?.ownerId} guildName={guild?.name || 'Local demo'} members={members} teams={teams} onImport={importMembers} role={role} /> : page === 'members' ? <RosterDashboard members={members} /> : page === 'static' ? <Teams staticOnly guildName={guild?.name || 'Local demo'} members={members} teams={staticDraft.teams} mode="guild-league" teamNames={staticDraft.teamNames} groupNames={staticDraft.groupNames} onTeamsChange={updateStaticDraft} editable={role !== 'Viewer'} generate={autoBalanceStatic} clear={clearStaticTeams} busy={busy} /> : <Teams guildName={guild?.name || 'Local demo'} members={members} teams={teams} mode={board.mode} teamNames={board.teamNames} groupNames={board.groupNames} board={board} staticParties={staticBoard.teams} staticPartyNames={staticBoard.teamNames} activeUsers={activeTeamBuilderUsers} selectMode={selectMode} onTeamsChange={saveTeams} editable={role !== 'Viewer'} generate={autoBalance} clear={clearTeams} save={saveTeam} activeSaveId={activeSaveId} savedTeams={savedTeams} load={loadTeam} deleteSaved={deleteSavedTeam} busy={busy} />;
   const logout = async () => { try { if (firebaseEnabled) await signOut(auth); else exitDemo(); } catch { setError('Could not sign out. Please try again.'); } };
   return <div className="workspace-frame"><Navbar page={page} setPage={setPage} role={role} memberCount={members.length} user={user} guild={guild} onLogout={logout} notifications={notifications} clearNotifications={() => setNotifications([])} /><div className="app-shell">{!firebaseEnabled && <p className="demo-banner">Local demo — data stays in this browser. No online account is created.</p>}{error && <p className="workspace-error" role="alert">{error}</p>}{loaded ? active : <p className="workspace-loading" role="status">Loading your workspace…</p>}</div></div>;
 }

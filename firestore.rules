@@ -121,16 +121,17 @@ service cloud.firestore {
         allow get, list: if canReadGuild(guildId);
         allow create, update: if teamId == '_meta'
           ? canManageGuild(guildId)
-            && request.resource.data.keys().hasOnly(['mode', 'schemaVersion', 'updatedAt'])
+            && request.resource.data.keys().hasOnly(['mode', 'schemaVersion', 'updatedAt', 'sub'])
             && request.resource.data.mode in ['guild-league', 'polarity-zone', 'siege']
             && request.resource.data.schemaVersion == 1
+            && (!('sub' in request.resource.data) || request.resource.data.sub == null || request.resource.data.sub is map)
             && request.resource.data.updatedAt == request.time
           : canManageGuild(guildId)
             && request.resource.data.keys().hasOnly(['name', 'parties', 'order', 'updatedAt'])
             && request.resource.data.name is string
             && request.resource.data.name.size() <= 60
             && request.resource.data.parties is list
-            && request.resource.data.parties.size() <= 8
+            && request.resource.data.parties.size() <= 18
             && request.resource.data.order is int
             && request.resource.data.order >= 0
             && request.resource.data.updatedAt == request.time;

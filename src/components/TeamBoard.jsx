@@ -10,7 +10,7 @@ import { BOARD_MODES, matchesMemberStatus, sortMembersByGearScore } from '../fir
 const cloneTeams = teams => Object.fromEntries(Object.entries(teams).map(([id, parties]) => [id, parties.map(party => [...party])]));
 const partySummary = (slots, members) => { const players = slots.map(id => members.find(member => member.id === id)).filter(Boolean); return { total: players.reduce((sum, member) => sum + Number(member.gearScore || 0), 0), count: players.length }; };
 
-export default function TeamBoard({ members, teams, mode, teamNames, groupNames, statusFilter, setStatusFilter, onTeamsChange, editable, guildName, teamActionsTarget, staticOnly = false, staticParties = {}, staticPartyNames = {}, activeUsers = [] }) {
+export default function TeamBoard({ members, teams, mode, teamNames, groupNames, statusFilter, setStatusFilter, onTeamsChange, editable, guildName, teamActionsTarget, staticOnly = false, staticParties = {}, staticPartyNames = {}, activeUsers = [], subMode = false, onToggleSub, mainTeams = {}, subTeams = {} }) {
   const [active, setActive] = useState(null);
   const [query, setQuery] = useState('');
   const [classFilter, setClassFilter] = useState('');
@@ -25,8 +25,11 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const assigned = new Set(Object.values(teams).flat(2).filter(Boolean));
   const classes = useMemo(() => [...new Set(members.map(member => member.className).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [members]);
-  const available = sortMembersByGearScore(members.filter(member => !assigned.has(member.id) && matchesMemberStatus(member, statusFilter) && member.ign.toLowerCase().includes(query.toLowerCase()) && (!classFilter || member.className === classFilter)));
-  const limit = BOARD_MODES[mode].players;
+  const mainAssigned = new Set(Object.values(mainTeams).flat(2).filter(Boolean));
+  const subAssigned = new Set(Object.values(subTeams).flat(2).filter(Boolean));
+  const reservedByOtherSide = subMode ? mainAssigned : subAssigned;
+  const available = sortMembersByGearScore(members.filter(member => !assigned.has(member.id) && !reservedByOtherSide.has(member.id) && matchesMemberStatus(member, statusFilter) && member.ign.toLowerCase().includes(query.toLowerCase()) && (!classFilter || member.className === classFilter)));
+  const limit = mode === 'guild-league' && subMode ? 90 : BOARD_MODES[mode].players;
   const full = Object.values(teams).flat().length >= limit / 5;
   const apply = (next, names = teamNames, groups = groupNames) => onTeamsChange({ teams: next, teamNames: names, groupNames: groups, mode });
   const addTeam = async event => {
@@ -43,7 +46,7 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
     apply(next, names, groups);
   };
   const addParty = id => {
-    if (!editable || full || teams[id].length >= (staticOnly ? 12 : 8)) return;
+    if (!editable || full || teams[id].length >= Math.min(staticOnly ? 12 : 18, limit / 5)) return;
     apply({ ...teams, [id]: [...teams[id], Array(5).fill(null)] }, { ...teamNames, [id]: [...teamNames[id], ''] });
   };
   const removeParty = (id, partyIndex) => {
@@ -86,20 +89,20 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
     apply(next);
   };
   const openScreenshot = () => setScreenshotTeam({
-    name: 'Full Roster',
-    guildName: guildName || 'RONW Guild', modeName: BOARD_MODES[mode].name, createdAt: new Date().toISOString(),
+    name: subMode ? 'SUB Roster' : 'MAIN Roster',
+    guildName: guildName || 'RONW Guild', modeName: `${BOARD_MODES[mode].name}${mode === 'guild-league' ? ` ${subMode ? 'SUB' : 'MAIN'}` : ''}`, createdAt: new Date().toISOString(),
     teams: teamEntries.map(([id, parties], teamIndex) => ({
       name: groupNames[id] || `Team ${teamIndex + 1}`,
       parties: parties.map((slots, index) => ({ name: teamNames[id][index] || `Party ${index + 1}`, slots: Array.from({ length: 5 }, (_, slot) => { const member = members.find(item => item.id === slots[slot]); return member ? { ...member } : null; }) })),
     })),
   });
   return <DndContext sensors={sensors} onDragStart={event => setActive(event.active.data.current?.member)} onDragCancel={() => setActive(null)} onDragEnd={({ active: item, over }) => { updatePlacement(item.id, over?.id ?? null); setActive(null); }}>
-    {teamActionsTarget && createPortal(<>{!staticOnly && <button className="user-button screenshot-team-button" disabled={!teamEntries.length} onClick={openScreenshot}>Screenshot team</button>}<button className="add-party" disabled={!editable || !selectedId || full || selectedParties.length >= (staticOnly ? 12 : 8)} title={selectedParties.length >= (staticOnly ? 12 : 8) ? `Maximum of ${staticOnly ? 12 : 8} parties ${staticOnly ? 'in this roster' : 'per team'}` : full ? `${BOARD_MODES[mode].name} party limit reached` : undefined} onClick={() => addParty(selectedId)}>+ Add party</button>{!staticOnly && <button className="remove-party" disabled={!editable || !selectedId} onClick={() => removeTeam(selectedId)}>Remove team</button>}</>, teamActionsTarget)}
+    {teamActionsTarget && createPortal(<>{!staticOnly && <button className="user-button screenshot-team-button" disabled={!teamEntries.length} onClick={openScreenshot}>Screenshot team</button>}<button className="add-party" disabled={!editable || !selectedId || full || selectedParties.length >= Math.min(staticOnly ? 12 : 18, limit / 5)} title={full ? `${mode === 'guild-league' && subMode ? 'Guild League SUB' : BOARD_MODES[mode].name} party limit reached` : undefined} onClick={() => addParty(selectedId)}>+ Add party</button>{!staticOnly && <button className="remove-party" disabled={!editable || !selectedId} onClick={() => removeTeam(selectedId)}>Remove team</button>}</>, teamActionsTarget)}
     <div className="planner-layout compact-view"><main className="builder-workspace">
-      <div className="builder-heading"><div><p className="eyebrow">{staticOnly ? 'GUILD STATIC ROSTER' : 'BATTLEFIELD PLANNER'}</p><h2>{staticOnly ? 'Guild parties' : 'Your teams'}</h2></div><div className="builder-heading-tools">{!staticOnly && activeUsers.length > 0 && <span className="active-collaborators" title={activeUsers.join(', ')}>{activeUsers.length} active</span>}{!staticOnly && <label className="static-fill-toggle" title="When you place a member with a saved Static party, fill this party with that saved lineup."><input type="checkbox" checked={fillFromStatic} onChange={event => setFillFromStatic(event.target.checked)} disabled={!editable || !Object.values(staticParties).some(parties => parties.some(slots => slots.some(Boolean)))} /><span>Static</span></label>}<span className="team-assigned-count">{assigned.size}{Number.isFinite(limit) ? `/${limit}` : ''} assigned</span></div></div>
+      <div className="builder-heading"><div><p className="eyebrow">{staticOnly ? 'GUILD STATIC ROSTER' : 'BATTLEFIELD PLANNER'}</p><h2>{staticOnly ? 'Guild parties' : 'Your teams'}</h2></div><div className="builder-heading-tools">{!staticOnly && activeUsers.length > 0 && <span className="active-collaborators" title={activeUsers.join(', ')}>{activeUsers.length} active</span>}{!staticOnly && <label className="static-fill-toggle" title="When you place a member with a saved Static party, fill this party with that saved lineup."><input type="checkbox" checked={fillFromStatic} onChange={event => setFillFromStatic(event.target.checked)} disabled={!editable || !Object.values(staticParties).some(parties => parties.some(slots => slots.some(Boolean)))} /><span>Static</span></label>}<span className="team-assigned-count">{assigned.size}{Number.isFinite(limit) ? `/${limit}` : ''} assigned</span>{mode === 'guild-league' && !staticOnly && <button className="user-button" type="button" disabled={!editable} onClick={onToggleSub}>{subMode ? 'MAIN' : 'SUB'}</button>}</div></div>
       {!staticOnly && <form className="add-team-form" onSubmit={addTeam}><label>New team name<input value={newTeamName} onChange={event => setNewTeamName(event.target.value)} required maxLength={60} placeholder="e.g. Defense squad" disabled={!editable} /></label><button className="primary-button" disabled={!editable || !newTeamName.trim()}>+ Add team</button></form>}
       {!Object.keys(teams).length && <div className="team-empty"><h3>Build your own formation</h3><p>Create a team above, then add parties and drag members into their slots.</p></div>}
-      {!staticOnly && teamEntries.length > 0 && <div className="team-tabs" role="tablist" aria-label="Teams">{teamEntries.map(([id, parties], index) => <TeamTab key={id} id={id} name={groupNames[id] || `Team ${index + 1}`} count={parties.length} gearRating={partySummary(parties.flat(), members).total} selected={selectedId === id} editable={editable} onSelect={() => setSelectedTeam(id)} onRename={name => apply(teams, teamNames, { ...groupNames, [id]: name })} onNavigate={event => { let next; if (event.key === 'ArrowRight') next = (index + 1) % teamEntries.length; else if (event.key === 'ArrowLeft') next = (index - 1 + teamEntries.length) % teamEntries.length; else if (event.key === 'Home') next = 0; else if (event.key === 'End') next = teamEntries.length - 1; else return; event.preventDefault(); setSelectedTeam(teamEntries[next][0]); event.currentTarget.parentElement.children[next].focus(); }} />)}</div>}
+      {!staticOnly && teamEntries.length > 0 && <div className="team-tabs" role="tablist" aria-label="Teams">{teamEntries.map(([id, parties], index) => <TeamTab key={id} id={id} name={groupNames[id] || `Team ${index + 1}`} count={parties.length} maxParties={Math.min(18, limit / 5)} gearRating={partySummary(parties.flat(), members).total} selected={selectedId === id} editable={editable} onSelect={() => setSelectedTeam(id)} onRename={name => apply(teams, teamNames, { ...groupNames, [id]: name })} onNavigate={event => { let next; if (event.key === 'ArrowRight') next = (index + 1) % teamEntries.length; else if (event.key === 'ArrowLeft') next = (index - 1 + teamEntries.length) % teamEntries.length; else if (event.key === 'Home') next = 0; else if (event.key === 'End') next = teamEntries.length - 1; else return; event.preventDefault(); setSelectedTeam(teamEntries[next][0]); event.currentTarget.parentElement.children[next].focus(); }} />)}</div>}
       {teamEntries.map(([id, parties], groupIndex) => id === selectedId ? <section className="team-group" key={id} role="tabpanel" id={`team-panel-${id}`} aria-labelledby={`team-tab-${id}`}>
         {!parties.length && <p className="team-empty-party">No parties yet. Add a party to create five player slots.</p>}
         <div className="team-parties">{parties.map((slots, partyIndex) => {
@@ -120,7 +123,7 @@ function NameEditor({ value, label, placeholder, disabled, onSave }) {
   return <input className="team-name-input" aria-label={label} placeholder={placeholder} value={draft} maxLength={60} disabled={disabled} onChange={event => setDraft(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function TeamTab({ id, name, count, gearRating, selected, editable, onSelect, onRename, onNavigate }) {
+function TeamTab({ id, name, count, maxParties = 8, gearRating, selected, editable, onSelect, onRename, onNavigate }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   const [saving, setSaving] = useState(false);
@@ -136,5 +139,5 @@ function TeamTab({ id, name, count, gearRating, selected, editable, onSelect, on
     finally { setSaving(false); }
   };
   if (editing) return <input className="team-tab-editor" aria-label="Rename team" value={draft} maxLength={60} autoFocus disabled={saving || !editable} onFocus={event => event.target.select()} onChange={event => setDraft(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } else if (event.key === 'Escape') { event.preventDefault(); editingRef.current = false; setEditing(false); } }} />;
-  return <button type="button" role="tab" id={`team-tab-${id}`} aria-selected={selected} aria-controls={`team-panel-${id}`} tabIndex={selected ? 0 : -1} title={`${name}: ${gearRating.toLocaleString()} GR${editable ? ' · Double-click or press F2 to rename' : ''}`} onClick={onSelect} onDoubleClick={begin} onKeyDown={event => { if (event.key === 'F2' && editable) { event.preventDefault(); begin(); } else onNavigate(event); }}><span className="team-tab-name">{name}</span><span className="team-tab-summary">{count}/8 · {gearRating.toLocaleString()} GR</span></button>;
+  return <button type="button" role="tab" id={`team-tab-${id}`} aria-selected={selected} aria-controls={`team-panel-${id}`} tabIndex={selected ? 0 : -1} title={`${name}: ${gearRating.toLocaleString()} GR${editable ? ' · Double-click or press F2 to rename' : ''}`} onClick={onSelect} onDoubleClick={begin} onKeyDown={event => { if (event.key === 'F2' && editable) { event.preventDefault(); begin(); } else onNavigate(event); }}><span className="team-tab-name">{name}</span><span className="team-tab-summary">{count}/{maxParties} · {gearRating.toLocaleString()} GR</span></button>;
 }
