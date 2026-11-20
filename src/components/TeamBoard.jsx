@@ -29,7 +29,7 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
   const subAssigned = new Set(Object.values(subTeams).flat(2).filter(Boolean));
   const reservedByOtherSide = subMode ? mainAssigned : subAssigned;
   const available = sortMembersByGearScore(members.filter(member => !assigned.has(member.id) && !reservedByOtherSide.has(member.id) && matchesMemberStatus(member, statusFilter) && member.ign.toLowerCase().includes(query.toLowerCase()) && (!classFilter || member.className === classFilter)));
-  const limit = mode === 'guild-league' && subMode ? 90 : BOARD_MODES[mode].players;
+  const limit = staticOnly ? Infinity : mode === 'guild-league' && subMode ? 90 : BOARD_MODES[mode].players;
   const full = Object.values(teams).flat().length >= limit / 5;
   const apply = (next, names = teamNames, groups = groupNames) => onTeamsChange({ teams: next, teamNames: names, groupNames: groups, mode });
   const addTeam = async event => {
@@ -46,7 +46,7 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
     apply(next, names, groups);
   };
   const addParty = id => {
-    if (!editable || full || teams[id].length >= Math.min(staticOnly ? 12 : 18, limit / 5)) return;
+    if (!editable || full || teams[id].length >= (staticOnly ? Infinity : Math.min(18, limit / 5))) return;
     apply({ ...teams, [id]: [...teams[id], Array(5).fill(null)] }, { ...teamNames, [id]: [...teamNames[id], ''] });
   };
   const removeParty = (id, partyIndex) => {
@@ -97,7 +97,7 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
     })),
   });
   return <DndContext sensors={sensors} onDragStart={event => setActive(event.active.data.current?.member)} onDragCancel={() => setActive(null)} onDragEnd={({ active: item, over }) => { updatePlacement(item.id, over?.id ?? null); setActive(null); }}>
-    {teamActionsTarget && createPortal(<>{!staticOnly && <button className="user-button screenshot-team-button" disabled={!teamEntries.length} onClick={openScreenshot}>Screenshot team</button>}<button className="add-party" disabled={!editable || !selectedId || full || selectedParties.length >= Math.min(staticOnly ? 12 : 18, limit / 5)} title={full ? `${mode === 'guild-league' && subMode ? 'Guild League SUB' : BOARD_MODES[mode].name} party limit reached` : undefined} onClick={() => addParty(selectedId)}>+ Add party</button>{!staticOnly && <button className="remove-party" disabled={!editable || !selectedId} onClick={() => removeTeam(selectedId)}>Remove team</button>}</>, teamActionsTarget)}
+    {teamActionsTarget && createPortal(<>{!staticOnly && <button className="user-button screenshot-team-button" disabled={!teamEntries.length} onClick={openScreenshot}>Screenshot team</button>}<button className="add-party" disabled={!editable || !selectedId || full || selectedParties.length >= (staticOnly ? Infinity : Math.min(18, limit / 5))} title={full ? `${mode === 'guild-league' && subMode ? 'Guild League SUB' : BOARD_MODES[mode].name} party limit reached` : undefined} onClick={() => addParty(selectedId)}>+ Add party</button>{!staticOnly && <button className="remove-party" disabled={!editable || !selectedId} onClick={() => removeTeam(selectedId)}>Remove team</button>}</>, teamActionsTarget)}
     <div className="planner-layout compact-view"><main className="builder-workspace">
       <div className="builder-heading"><div><p className="eyebrow">{staticOnly ? 'GUILD STATIC ROSTER' : 'BATTLEFIELD PLANNER'}</p><h2>{staticOnly ? 'Guild parties' : 'Your teams'}</h2></div><div className="builder-heading-tools">{!staticOnly && activeUsers.length > 0 && <span className="active-collaborators" title={activeUsers.join(', ')}>{activeUsers.length} active</span>}{!staticOnly && <label className="static-fill-toggle" title="When you place a member with a saved Static party, fill this party with that saved lineup."><input type="checkbox" checked={fillFromStatic} onChange={event => setFillFromStatic(event.target.checked)} disabled={!editable || !Object.values(staticParties).some(parties => parties.some(slots => slots.some(Boolean)))} /><span>Static</span></label>}<span className="team-assigned-count">{assigned.size}{Number.isFinite(limit) ? `/${limit}` : ''} assigned</span>{mode === 'guild-league' && !staticOnly && <div className={`lineup-switcher ${subMode ? 'is-sub' : 'is-main'}`}><span className="lineup-current-label">{subMode ? 'SUB LINEUP' : 'MAIN LINEUP'}</span><button className="lineup-switch-button" type="button" disabled={!editable} onClick={onToggleSub} aria-label={`Switch to ${subMode ? 'MAIN' : 'SUB'} lineup`}><span>Switch to {subMode ? 'MAIN' : 'SUB'}</span><span className="lineup-switch-arrow" aria-hidden="true">⇄</span></button></div>}</div></div>
       {!staticOnly && <form className="add-team-form" onSubmit={addTeam}><label>New team name<input value={newTeamName} onChange={event => setNewTeamName(event.target.value)} required maxLength={60} placeholder="e.g. Defense squad" disabled={!editable} /></label><button className="primary-button" disabled={!editable || !newTeamName.trim()}>+ Add team</button></form>}
