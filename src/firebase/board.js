@@ -73,11 +73,11 @@ export function serializeBoard(value) {
   return { mode: board.mode, schemaVersion: 2, groups: groups(board), sub: board.sub ? { groups: groups(board.sub) } : null };
 }
 
-export function boardError(value) {
+export function boardError(value, { allowUnlimitedParties = false } = {}) {
   const board = normalizeBoard(value);
   const parties = Object.values(board.teams).flat();
   const limit = BOARD_MODES[board.mode].players;
-  if (parties.length > limit / 5) return `${BOARD_MODES[board.mode].name} allows up to ${limit} players in ${limit / 5} five-person parties.`;
+  if (!allowUnlimitedParties && parties.length > limit / 5) return `${BOARD_MODES[board.mode].name} allows up to ${limit} players in ${limit / 5} five-person parties.`;
   if (parties.some(slots => slots.length > 5)) return 'Each party can contain at most five players.';
   if ([...Object.values(board.teamNames).flat(), ...Object.values(board.groupNames)].some(name => name.length > 60)) return 'Team and party names must be 60 characters or fewer.';
   const assigned = parties.flat().filter(Boolean);

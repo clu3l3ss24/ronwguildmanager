@@ -213,7 +213,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   const updateStaticDraft = next => {
     if (role === 'Viewer' || operationRef.current) return false;
     const updated = normalizeStaticBoard(typeof next === 'function' ? next(staticDraft) : next);
-    const validationError = boardError(updated);
+    const validationError = boardError(updated, { allowUnlimitedParties: true });
     if (validationError) { setError(validationError); return false; }
     setStaticDraft(updated); setError(''); return saveStaticTeams(updated);
   };
@@ -221,7 +221,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
     if (role === 'Viewer' || operationRef.current) return false;
     const before = normalizeStaticBoard(staticBoardRef.current);
     const updated = normalizeStaticBoard(draft);
-    const validationError = boardError(updated);
+    const validationError = boardError(updated, { allowUnlimitedParties: true });
     if (validationError) { setError(validationError); return false; }
     if (JSON.stringify(before) === JSON.stringify(updated)) return true;
     const expectedVersion = staticBoardVersionRef.current;
