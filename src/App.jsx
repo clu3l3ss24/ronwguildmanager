@@ -194,7 +194,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
         const previousStaticNames = formationMemberNames(currentStatic.teams, members);
         const reconciledStatic = prepareFormation(currentStatic.teams, prepared.members, currentStatic.groupNames, currentStatic.teamNames, previousStaticNames);
         const nextStatic = { ...currentStatic, teams: reconciledStatic.teams };
-        result = { added: prepared.members.length, duplicates: prepared.duplicates, staticBoard: nextStatic, removedStaticMembers: reconciledStatic.removedMembers, removedSavedMembers, removedActiveMembers };
+        result = { added: prepared.members.length, duplicates: prepared.duplicates, staticBoard: nextStatic, removedStaticMembers: reconciledStatic.removedMembers, removedSavedMembers, removedActiveMembers, offlineMembers: prepared.offlineMembers };
       }
       const nextStatic = normalizeStaticBoard(result.staticBoard || staticBoardRef.current);
       localStaticEditRef.current = result.staticBoardEditId || null;
@@ -205,10 +205,13 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
         ...(result.removedSavedMembers || []).map(member => ({ ...member, source: `${member.formationName} · ${member.side}` })),
         ...(result.removedStaticMembers || []).map(member => ({ ...member, source: 'Static' })),
       ];
+      const importNotices = [];
       if (removals.length) {
         const details = removals.map(member => `${member.name || 'Unknown member'} from ${member.source} / ${member.team} / ${member.party}`).join('; ');
-        setNotice(`Roster import removed ${removals.length} saved party assignment${removals.length === 1 ? '' : 's'}: ${details}.`);
+        importNotices.push(`Roster import removed ${removals.length} saved party assignment${removals.length === 1 ? '' : 's'}: ${details}.`);
       }
+      if (result.offlineMembers?.length) importNotices.push(`Members offline for 3 days or more (${result.offlineMembers.length}): ${result.offlineMembers.join(', ')}.`);
+      if (importNotices.length) setNotice(importNotices.join(' '));
       return result;
     } finally { operationRef.current = false; setBusy(false); }
   };

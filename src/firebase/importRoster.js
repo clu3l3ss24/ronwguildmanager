@@ -3,9 +3,10 @@ import { blankBoard, blankStaticBoard, normalizeBoard, normalizeStaticBoard, ser
 import { formationMemberNames, prepareFormation } from './teams.js';
 
 export function prepareRosterImport(roster, existingMembers) {
-  const existingByName = new Map(existingMembers.map(member => [member.ign.trim().toLowerCase(), member.id]));
+  const existingByName = new Map(existingMembers.map(member => [member.ign.trim().toLowerCase(), member]));
   const seen = new Set();
   const members = [];
+  const importedAt = new Date().toISOString();
   for (const member of roster) {
     const ign = member.ign.trim();
     const sourceId = String(member.sourceId || '').trim();
@@ -14,10 +15,21 @@ export function prepareRosterImport(roster, existingMembers) {
     seen.add(key);
     // The IGN is the durable identity for assignments. Source IDs may be reused
     // by roster exports, so a changed name must receive a new member ID.
-    const id = existingByName.get(ign.toLowerCase());
-    members.push({ ...member, sourceId, ign, id: id || crypto.randomUUID() });
+    const previous = existingByName.get(ign.toLowerCase());
+    const id = previous?.id;
+    const online = member.online === true;
+    const offlineSince = online ? null : Number.isFinite(member.offlineDays)
+      ? new Date(Date.parse(importedAt) - member.offlineDays * 24 * 60 * 60 * 1000).toISOString()
+      : previous?.online === false && previous.offlineSince ? previous.offlineSince : importedAt;
+    members.push({ ...member, sourceId, ign, id: id || crypto.randomUUID(), online, offlineSince });
   }
-  return { members, duplicates: roster.length - members.length };
+  const offlineCutoff = Date.now() - 3 * 24 * 60 * 60 * 1000;
+  const offlineMembers = members.filter(member => {
+    if (member.online) return false;
+    const offlineSinceMillis = Date.parse(member.offlineSince);
+    return (Number.isFinite(member.offlineDays) && member.offlineDays >= 3) || (Number.isFinite(offlineSinceMillis) && offlineSinceMillis <= offlineCutoff);
+  }).map(member => member.ign);
+  return { members, duplicates: roster.length - members.length, offlineMembers };
 }
 
 export function reconcileSavedFormation(value, members, previousMembers, previousNames = {}) {
@@ -82,7 +94,7 @@ export async function replaceGuildRoster(db, guildId, roster) {
   batch.set(staticRef, { teams: serializeBoard(nextStatic), boardEditId: staticBoardEditId, updatedAt: serverTimestamp() });
   // Roster replacement, event-board reset and static-member reconciliation are atomic.
   await batch.commit();
-  return { added: prepared.members.length, duplicates: prepared.duplicates, boardEditId, staticBoardEditId, staticBoard: nextStatic, removedStaticMembers: reconciledStatic.removedMembers, removedSavedMembers, removedActiveMembers };
+  return { added: prepared.members.length, duplicates: prepared.duplicates, boardEditId, staticBoardEditId, staticBoard: nextStatic, removedStaticMembers: reconciledStatic.removedMembers, removedSavedMembers, removedActiveMembers, offlineMembers: prepared.offlineMembers };
 }
 
 export function describeImportError(error) {

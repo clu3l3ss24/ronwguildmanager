@@ -9,6 +9,7 @@ import { BOARD_MODES, matchesMemberStatus, sortMembersByGearScore } from '../fir
 
 const cloneTeams = teams => Object.fromEntries(Object.entries(teams).map(([id, parties]) => [id, parties.map(party => [...party])]));
 const partySummary = (slots, members) => { const players = slots.map(id => members.find(member => member.id === id)).filter(Boolean); return { total: players.reduce((sum, member) => sum + Number(member.gearScore || 0), 0), count: players.length }; };
+const timestampMillis = value => value?.toDate ? value.toDate().getTime() : typeof value === 'number' ? value : Date.parse(value);
 
 export default function TeamBoard({ members, teams, mode, teamNames, groupNames, statusFilter, setStatusFilter, onTeamsChange, editable, guildName, teamActionsTarget, staticOnly = false, staticParties = {}, staticPartyNames = {}, activeUsers = [], subMode = false, onToggleSub, mainTeams = {}, subTeams = {} }) {
   const [active, setActive] = useState(null);
@@ -19,12 +20,18 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
   const [fillFromStatic, setFillFromStatic] = useState(false);
   const [staticNotice, setStaticNotice] = useState('');
   const [staticDialog, setStaticDialog] = useState(null);
+  const [clock, setClock] = useState(Date.now());
   const teamEntries = Object.entries(teams);
   const selectedId = Object.hasOwn(teams, selectedTeam) ? selectedTeam : teamEntries[0]?.[0];
   const selectedParties = teams[selectedId] || [];
   const selectedIndex = teamEntries.findIndex(([id]) => id === selectedId);
   const [screenshotTeam, setScreenshotTeam] = useState(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const averageGearScore = useMemo(() => {
+    const scores = members.map(member => Number(member.gearScore)).filter(score => Number.isFinite(score) && score > 0);
+    return scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0;
+  }, [members]);
+  useEffect(() => { const interval = setInterval(() => setClock(Date.now()), 60_000); return () => clearInterval(interval); }, []);
   const assigned = new Set(Object.values(teams).flat(2).filter(Boolean));
   const classes = useMemo(() => [...new Set(members.map(member => member.className).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [members]);
   const mainAssigned = new Set(Object.values(mainTeams).flat(2).filter(Boolean));
@@ -156,7 +163,13 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
           return <article className="party-card" key={`${id}-${partyIndex}`}><header><div><NameEditor value={teamNames[id][partyIndex] || ''} label={`Party name ${groupIndex + 1} ${partyIndex + 1}`} placeholder={`Party ${partyIndex + 1}`} disabled={!editable} onSave={name => apply(teams, { ...teamNames, [id]: teamNames[id].map((current, index) => index === partyIndex ? name : current) })} /><small>{summary.count}/5 · {summary.total.toLocaleString()} GR</small></div><button className="remove-party" disabled={!editable} onClick={() => removeParty(id, partyIndex)} aria-label={`Remove party ${groupIndex + 1} ${partyIndex + 1}`}>Remove party</button></header><div className="party-slots">{slots.map((memberId, slotIndex) => { const slotId = `${id}:${partyIndex}:${slotIndex}`; return <TeamSlot key={slotIndex} id={slotId} index={slotIndex} disabled={!editable} member={members.find(member => member.id === memberId)} onRemove={member => removeMember(member.id, slotId)} />; })}</div></article>;
         })}</div>
       </section> : null)}
-    </main><aside className="member-sidebar"><div className="sidebar-header"><p className="eyebrow">ROSTER SOURCE</p><h2>Available Members</h2><span>{available.length} members</span></div><label>Search IGN<input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search player..." /></label><label>Class Filter<select value={classFilter} onChange={event => setClassFilter(event.target.value)}><option value="">All Classes</option>{classes.map(className => <option key={className} value={className}>{className}</option>)}</select></label><label>Member status<select aria-label="Member status" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="online">Online</option><option value="offline">Offline</option></select></label><p className="roster-sort-note">Highest gear score first</p><PoolDrop>{available.map(member => <DraggableMember key={member.id} member={member} disabled={!editable} />)}{!available.length && <p className="sidebar-empty">No available members found.</p>}</PoolDrop></aside></div>
+    </main><aside className="member-sidebar"><div className="sidebar-header"><p className="eyebrow">ROSTER SOURCE</p><h2>Available Members</h2><span>{available.length} members</span></div><label>Search IGN<input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search player..." /></label><label>Class Filter<select value={classFilter} onChange={event => setClassFilter(event.target.value)}><option value="">All Classes</option>{classes.map(className => <option key={className} value={className}>{className}</option>)}</select></label><label>Member status<select aria-label="Member status" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="online">Online</option><option value="offline">Offline</option></select></label><p className="roster-sort-note">Highest gear score first</p><div className="roster-health-legend"><span><i className="yellow" />10%+ below average GR</span><span><i className="red" />Offline over 3 days</span></div><PoolDrop>{available.map(member => {
+      const gearScore = Number(member.gearScore);
+      const lowGear = averageGearScore > 0 && Number.isFinite(gearScore) && gearScore > 0 && gearScore <= averageGearScore * 0.9;
+      const offlineSince = timestampMillis(member.offlineSince);
+      const longOffline = member.online === false && Number.isFinite(offlineSince) && clock - offlineSince > 3 * 24 * 60 * 60 * 1000;
+      return <DraggableMember key={member.id} member={member} disabled={!editable} lowGear={lowGear} longOffline={longOffline} />;
+    })}{!available.length && <p className="sidebar-empty">No available members found.</p>}</PoolDrop></aside></div>
     {!staticOnly && screenshotTeam && <TeamScreenshot snapshot={screenshotTeam} onClose={() => setScreenshotTeam(null)} />}
     <DragOverlay>{active ? <MemberCard member={active} compact /> : null}</DragOverlay>
   </DndContext>;

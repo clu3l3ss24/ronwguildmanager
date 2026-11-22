@@ -36,6 +36,15 @@ function numeric(value, field, warnings) {
   return parsed;
 }
 
+function parseOnlineStatus(value) {
+  const status = String(value ?? '').trim();
+  const offline = /\boffline\b/i.test(status);
+  if (!offline) return { online: /\bonline\b/i.test(status), offlineDays: null };
+  const dayMatch = status.match(/(?:offline\D{0,24}(\d+(?:\.\d+)?)\s*(?:d|days?)\b|(\d+(?:\.\d+)?)\s*(?:d|days?)\D{0,24}offline)/i);
+  const offlineDays = dayMatch ? Number(dayMatch[1] || dayMatch[2]) : null;
+  return { online: false, offlineDays: Number.isFinite(offlineDays) ? offlineDays : null };
+}
+
 export function mapRosterCsvRows(rows, headers) {
   if (!Array.isArray(headers) || headers.length === 0) throw new RosterCsvValidationError('The CSV has no column headers.');
   const fields = headers.map(header => headerMap.get(normalizeHeader(header)) || null);
@@ -69,10 +78,11 @@ export function mapRosterCsvRows(rows, headers) {
     const weekly = numeric(read('weekly'), 'Weekly', warnings);
     const weeklyContribution = numeric(read('weeklyContribution'), 'Weekly Contribution', warnings);
     const totalContribution = numeric(read('totalContribution'), 'Total Contribution', warnings);
+    const onlineStatus = parseOnlineStatus(read('onlineStatus'));
     members.push({
       sourceId, ign, level, className: read('className'), title: read('title'), gender: read('gender'), guildPosition: read('position'),
       gearScore, weekly, weeklyContribution, totalContribution,
-      online: /online/i.test(read('onlineStatus')),
+      ...onlineStatus,
     });
   }
   if (!members.length) throw new RosterCsvValidationError('No valid player rows were found. Add a non-empty Player value and retry; the current roster was not changed.');

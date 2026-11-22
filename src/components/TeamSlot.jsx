@@ -2,10 +2,10 @@ import { useDroppable } from '@dnd-kit/core';
 import { useDraggable } from '@dnd-kit/core';
 import MemberCard from './MemberCard';
 
-export function DraggableMember({ member, disabled = false }) {
+export function DraggableMember({ member, disabled = false, lowGear = false, longOffline = false }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: member.id, data: { member }, disabled });
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
-  return <div ref={setNodeRef} style={style} {...listeners} {...attributes} className={isDragging ? 'dragging' : ''}><MemberCard member={member} compact /></div>;
+  return <div ref={setNodeRef} style={style} {...listeners} {...attributes} className={isDragging ? 'dragging' : ''}><MemberCard member={member} compact lowGear={lowGear} longOffline={longOffline} /></div>;
 }
 export default function TeamSlot({ id, member, index, disabled = false, onRemove }) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled });
