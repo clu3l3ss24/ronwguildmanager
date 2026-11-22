@@ -17,6 +17,8 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
   const [newTeamName, setNewTeamName] = useState('');
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [fillFromStatic, setFillFromStatic] = useState(false);
+  const [staticNotice, setStaticNotice] = useState('');
+  const [staticDialog, setStaticDialog] = useState(null);
   const teamEntries = Object.entries(teams);
   const selectedId = Object.hasOwn(teams, selectedTeam) ? selectedTeam : teamEntries[0]?.[0];
   const selectedParties = teams[selectedId] || [];
@@ -55,7 +57,7 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
     const next = cloneTeams(teams); next[id].splice(partyIndex, 1);
     apply(next, { ...teamNames, [id]: teamNames[id].filter((_, index) => index !== partyIndex) });
   };
-  const updatePlacement = (memberId, target) => {
+  const updatePlacement = async (memberId, target) => {
     if (!editable) return;
     const next = cloneTeams(teams); let source = null;
     Object.entries(next).forEach(([id, parties]) => parties.forEach((party, partyIndex) => party.forEach((idInSlot, slotIndex) => { if (idInSlot === memberId) source = [id, partyIndex, slotIndex]; })));
@@ -68,12 +70,54 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
       const savedPartyIndex = savedGroup?.[1].findIndex(slots => slots.includes(memberId)) ?? -1;
       const savedParty = savedPartyIndex >= 0 ? savedGroup[1][savedPartyIndex] : null;
       if (savedParty) {
-        const savedIds = new Set(savedParty.filter(Boolean));
-        Object.values(next).forEach(parties => parties.forEach(slots => slots.forEach((assignedId, index) => { if (assignedId && savedIds.has(assignedId)) slots[index] = null; })));
-        next[id][Number(partyIndex)] = Array.from({ length: 5 }, (_, index) => savedParty[index] || null);
+        const partySlotIndex = Number(partyIndex);
+        const targetParty = next[id][partySlotIndex];
+        const displaced = targetParty[Number(slotIndex)];
+        targetParty[Number(slotIndex)] = memberId;
+        if (displaced && source) next[source[0]][source[1]][source[2]] = displaced;
         const names = { ...teamNames, [id]: [...teamNames[id]] };
-        names[id][Number(partyIndex)] = staticPartyNames[savedGroup[0]]?.[savedPartyIndex] || names[id][Number(partyIndex)] || '';
-        return apply(next, names);
+        names[id][Number(partyIndex)] = names[id][Number(partyIndex)] || staticPartyNames[savedGroup[0]]?.[savedPartyIndex] || '';
+        const staticMembers = savedParty.filter(id => id && id !== memberId);
+        if (!staticMembers.length) return apply(next, names);
+
+        const fullTeams = cloneTeams(next);
+        const fullNames = { ...names, [id]: [...names[id]] };
+        const staticIds = savedParty.filter(staticMemberId => staticMemberId && !reservedByOtherSide.has(staticMemberId));
+        const staticIdSet = new Set(staticIds);
+        const targetPartyAfterMove = fullTeams[id][partySlotIndex];
+        const targetOpenSlots = targetPartyAfterMove.filter(staticMemberId => !staticIdSet.has(staticMemberId) && !staticMemberId).length
+          + targetPartyAfterMove.filter(staticMemberId => staticIdSet.has(staticMemberId)).length;
+        const partyLimit = staticOnly ? Infinity : Math.min(18, limit / 5);
+        const boardPartyCount = Object.values(fullTeams).reduce((count, parties) => count + parties.length, 0);
+        const canUseNewParty = boardPartyCount < limit / 5 && fullTeams[id].length < partyLimit;
+        const staticHeadcount = savedParty.filter(Boolean).length;
+        const targetCanFit = staticHeadcount <= targetOpenSlots;
+        let addedCount = 1;
+        if (targetCanFit || canUseNewParty) {
+          addedCount = 0;
+          Object.values(fullTeams).forEach(parties => parties.forEach(slots => slots.forEach((assignedId, index) => {
+            if (assignedId && staticIdSet.has(assignedId)) slots[index] = null;
+          })));
+          let destination = fullTeams[id][partySlotIndex];
+          if (!targetCanFit) {
+            destination = Array(5).fill(null);
+            fullTeams[id].push(destination);
+            fullNames[id].push(staticPartyNames[savedGroup[0]]?.[savedPartyIndex] || '');
+          }
+          for (const staticMemberId of staticIds) {
+            const openSlot = destination.findIndex(slot => !slot);
+            if (openSlot < 0) break;
+            destination[openSlot] = staticMemberId;
+            addedCount += 1;
+          }
+          if (targetCanFit) fullNames[id][partySlotIndex] = fullNames[id][partySlotIndex] || staticPartyNames[savedGroup[0]]?.[savedPartyIndex] || '';
+        }
+        setStaticNotice('');
+        if (targetCanFit) return apply(fullTeams, fullNames);
+        const success = await apply(next, names);
+        if (!success) return false;
+        setStaticDialog({ teams: fullTeams, names: fullNames, total: staticHeadcount, additional: staticMembers.length, addedCount });
+        return true;
       }
     }
     const displaced = party[Number(slotIndex)]; party[Number(slotIndex)] = memberId;
@@ -98,6 +142,8 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
   });
   return <DndContext sensors={sensors} onDragStart={event => setActive(event.active.data.current?.member)} onDragCancel={() => setActive(null)} onDragEnd={({ active: item, over }) => { updatePlacement(item.id, over?.id ?? null); setActive(null); }}>
     {teamActionsTarget && createPortal(<>{!staticOnly && <button className="user-button screenshot-team-button" disabled={!teamEntries.length} onClick={openScreenshot}>Screenshot team</button>}<button className="add-party" disabled={!editable || !selectedId || full || selectedParties.length >= (staticOnly ? Infinity : Math.min(18, limit / 5))} title={full ? `${mode === 'guild-league' && subMode ? 'Guild League SUB' : BOARD_MODES[mode].name} party limit reached` : undefined} onClick={() => addParty(selectedId)}>+ Add party</button>{!staticOnly && <button className="remove-party" disabled={!editable || !selectedId} onClick={() => removeTeam(selectedId)}>Remove team</button>}</>, teamActionsTarget)}
+    {staticNotice && <p className="formation-validation" role="status">{staticNotice}</p>}
+    {staticDialog && <StaticFillDialog total={staticDialog.total} additional={staticDialog.additional} addedCount={staticDialog.addedCount} onCancel={() => setStaticDialog(null)} onConfirm={async () => { const success = await apply(staticDialog.teams, staticDialog.names); if (success) setStaticDialog(null); }} />}
     <div className="planner-layout compact-view"><main className="builder-workspace">
       <div className="builder-heading"><div><p className="eyebrow">{staticOnly ? 'GUILD STATIC ROSTER' : 'BATTLEFIELD PLANNER'}</p><h2>{staticOnly ? 'Guild parties' : 'Your teams'}</h2></div><div className="builder-heading-tools">{!staticOnly && activeUsers.length > 0 && <span className="active-collaborators" title={activeUsers.join(', ')}>{activeUsers.length} active</span>}{!staticOnly && <label className="static-fill-toggle" title="When you place a member with a saved Static party, fill this party with that saved lineup."><input type="checkbox" checked={fillFromStatic} onChange={event => setFillFromStatic(event.target.checked)} disabled={!editable || !Object.values(staticParties).some(parties => parties.some(slots => slots.some(Boolean)))} /><span>Static</span></label>}<span className="team-assigned-count">{assigned.size}{Number.isFinite(limit) ? `/${limit}` : ''} assigned</span>{mode === 'guild-league' && !staticOnly && <div className={`lineup-switcher ${subMode ? 'is-sub' : 'is-main'}`}><span className="lineup-current-label">{subMode ? 'SUB LINEUP' : 'MAIN LINEUP'}</span><button className="lineup-switch-button" type="button" disabled={!editable} onClick={onToggleSub} aria-label={`Switch to ${subMode ? 'MAIN' : 'SUB'} lineup`}><span>Switch to {subMode ? 'MAIN' : 'SUB'}</span><span className="lineup-switch-arrow" aria-hidden="true">⇄</span></button></div>}</div></div>
       {!staticOnly && <form className="add-team-form" onSubmit={addTeam}><label>New team name<input value={newTeamName} onChange={event => setNewTeamName(event.target.value)} required maxLength={60} placeholder="e.g. Defense squad" disabled={!editable} /></label><button className="primary-button" disabled={!editable || !newTeamName.trim()}>+ Add team</button></form>}
@@ -116,6 +162,25 @@ export default function TeamBoard({ members, teams, mode, teamNames, groupNames,
   </DndContext>;
 }
 function PoolDrop({ children }) { const { setNodeRef, isOver } = useDroppable({ id: 'pool' }); return <div ref={setNodeRef} className={isOver ? 'pool-drop over' : 'pool-drop'}>{children}</div>; }
+function StaticFillDialog({ total, additional, addedCount, onCancel, onConfirm }) {
+  const dialog = useRef(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    const element = dialog.current;
+    element.showModal();
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { element.close(); document.body.style.overflow = previous; };
+  }, []);
+  const confirm = async () => { setSaving(true); try { await onConfirm(); } finally { setSaving(false); } };
+  return <dialog ref={dialog} className="formation-dialog static-fill-dialog" aria-labelledby="static-fill-title" onCancel={event => { event.preventDefault(); if (!saving) onCancel(); }}>
+    <header className="formation-dialog-heading"><div><p className="eyebrow">STATIC PARTY</p><h2 id="static-fill-title">Use the entire static?</h2></div><span className="static-hc-badge">{total} HC</span></header>
+    <p className="formation-dialog-description">This member belongs to a static with {total} HC ({additional} more). The member you placed is already in the party.</p>
+    <p className="formation-dialog-description">Add the rest of the static to open slots? If the current party runs out of room, a new party will be created.</p>
+    {addedCount < total && <p className="formation-validation" role="status">Only {addedCount} of {total} HC can be added within this battle mode's limits or current assignments.</p>}
+    <footer className="formation-dialog-footer"><button type="button" className="user-button" disabled={saving} onClick={onCancel}>Just this member</button><button type="button" className="primary-button" disabled={saving} onClick={confirm}>{saving ? 'Adding static…' : 'Use entire static'}</button></footer>
+  </dialog>;
+}
 function NameEditor({ value, label, placeholder, disabled, onSave }) {
   const [draft, setDraft] = useState(value); const latestValue = useRef(value); latestValue.current = value;
   useEffect(() => setDraft(value), [value]);
