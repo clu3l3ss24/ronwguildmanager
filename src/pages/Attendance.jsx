@@ -46,6 +46,7 @@ export default function Attendance({ members, rows, onAppend, onReset, editable,
   const [dateTo, setDateTo] = useState('');
   const [eventFilter, setEventFilter] = useState('');
   const [classFilter, setClassFilter] = useState('');
+  const [absenceSort, setAbsenceSort] = useState('highest');
   const [message, setMessage] = useState('');
   const classes = [...new Set(members.map(member => member.className).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const prepared = useMemo(() => rows.map(row => ({ ...row, member: attendanceMember(row, members), event: eventForDate(row.date) })), [rows, members]);
@@ -59,12 +60,18 @@ export default function Attendance({ members, rows, onAppend, onReset, editable,
   }), [prepared, nameFilter, dateFrom, dateTo, eventFilter, classFilter]);
   const attendanceTableRows = useMemo(() => [...filtered.reduce((groups, row) => {
     const className = row.member?.className || 'Mismatch';
-    const key = `${normalizeAttendanceName(row.name)}|${className}|${row.event}`;
-    const group = groups.get(key) || { name: row.name, className, event: row.event, dates: new Set() };
+    const key = `${normalizeAttendanceName(row.name)}|${className}${eventFilter ? `|${row.event}` : ''}`;
+    const group = groups.get(key) || { name: row.name, className, dates: new Set(), events: new Set() };
     group.dates.add(row.date);
+    group.events.add(row.event);
     groups.set(key, group);
     return groups;
-  }, new Map()).values()].map(group => ({ ...group, absent: group.dates.size })), [filtered]);
+  }, new Map()).values()].map(group => ({ ...group, absent: group.dates.size, events: [...group.events] }))
+    .sort((a, b) => absenceSort === 'lowest'
+      ? a.absent - b.absent || a.name.localeCompare(b.name)
+      : absenceSort === 'name'
+        ? a.name.localeCompare(b.name)
+        : b.absent - a.absent || a.name.localeCompare(b.name)), [filtered, eventFilter, absenceSort]);
   const mismatchGroups = [...prepared.filter(row => !row.member).reduce((groups, row) => {
     const key = normalizeAttendanceName(row.name);
     const group = groups.get(key) || { name: row.name, dates: [] };
@@ -96,6 +103,7 @@ export default function Attendance({ members, rows, onAppend, onReset, editable,
       <label>To date<input type="date" value={dateTo} onChange={event => setDateTo(event.target.value)}/></label>
       <label>Event<select value={eventFilter} onChange={event => setEventFilter(event.target.value)}><option value="">All events</option><option>Guild League</option><option>Guild Siege</option><option>No scheduled event</option></select></label>
       <label>Class<select value={classFilter} onChange={event => setClassFilter(event.target.value)}><option value="">All classes</option>{classes.map(name => <option key={name}>{name}</option>)}</select></label>
-    </div><div className="attendance-table-wrap"><table className="attendance-table"><thead><tr><th scope="col">Name</th><th scope="col">Class</th><th scope="col">Event</th><th scope="col">Absent</th></tr></thead><tbody>{attendanceTableRows.map(row => <tr key={`${normalizeAttendanceName(row.name)}-${row.className}-${row.event}`}><td className="attendance-name-cell">{row.name}</td><td><span className="attendance-class-chip">{row.className}</span></td><td><span className={`attendance-event-chip ${row.event === 'Guild League' ? 'league' : row.event === 'Guild Siege' ? 'siege' : 'other'}`}>{row.event}</span></td><td><span className="attendance-absent-count">{row.absent}</span></td></tr>)}</tbody></table>{!attendanceTableRows.length && <p className="attendance-empty">No absence records match these filters.</p>}</div></section>
+      <label>Sort by absent<select value={absenceSort} onChange={event => setAbsenceSort(event.target.value)}><option value="highest">Highest first</option><option value="lowest">Lowest first</option><option value="name">Name A-Z</option></select></label>
+    </div><div className="attendance-table-wrap"><table className="attendance-table"><thead><tr><th scope="col">Name</th><th scope="col">Class</th><th scope="col">Events</th><th scope="col">Absent</th></tr></thead><tbody>{attendanceTableRows.map(row => <tr key={`${normalizeAttendanceName(row.name)}-${row.className}-${eventFilter || 'all-events'}`}><td className="attendance-name-cell">{row.name}</td><td><span className="attendance-class-chip">{row.className}</span></td><td><div className="attendance-event-list">{row.events.map(event => <span key={event} className={`attendance-event-chip ${event === 'Guild League' ? 'league' : event === 'Guild Siege' ? 'siege' : 'other'}`}>{event}</span>)}</div></td><td><span className="attendance-absent-count">{row.absent}</span></td></tr>)}</tbody></table>{!attendanceTableRows.length && <p className="attendance-empty">No absence records match these filters.</p>}</div></section>
   </main>;
 }
