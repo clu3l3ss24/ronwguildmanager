@@ -380,7 +380,11 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   };
   const autoBalance = async (status = 'all', preferences = null) => {
     const before = Object.values(boardRef.current.teams).flat(2).filter(Boolean).length;
-    const next = autoBalanceBoard(members, boardRef.current, status, preferences);
+    const subAssigned = boardRef.current.mode === 'guild-league'
+      ? new Set(Object.values(boardRef.current.sub?.teams || {}).flat(2).filter(Boolean))
+      : new Set();
+    const eligibleMembers = members.filter(member => !subAssigned.has(member.id));
+    const next = autoBalanceBoard(eligibleMembers, boardRef.current, status, preferences);
     const success = await saveTeams(next);
     if (success) {
       const filled = Object.values(next.teams).flat(2).filter(Boolean).length - before;
@@ -410,13 +414,15 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
     if (removedTeams > 0 && !window.confirm(`Switch to ${BOARD_MODES[mode].name}? ${removedTeams} excess ${removedTeams === 1 ? 'party' : 'parties'} will be removed and their players returned to Available Members.`)) return;
     saveTeams(next);
   };
-  const saveTeam = async (name, targetId = null) => {
+  const saveTeam = async (name, targetId = null, currentBoard = boardRef.current) => {
     if (role === 'Viewer' || operationRef.current || !name.trim() || name.trim().length > 80) return false;
-    const incomplete = formationSaveError(boardRef.current, members);
+    const boardToSave = normalizeBoard(currentBoard);
+    const incomplete = formationSaveError(boardToSave, members);
     if (incomplete) { setError(incomplete); return false; }
     const existing = targetId ? savedTeams.find(item => item.id === targetId) : null;
     if (targetId && !existing) return false;
-    const snapshot = { id: targetId || crypto.randomUUID(), name: name.trim(), createdAt: existing?.createdAt || new Date().toISOString(), ...normalizeBoard(boardRef.current), memberNames: formationMemberNames(boardRef.current.teams, members) };
+    const memberNameTeams = { ...boardToSave.teams, ...Object.fromEntries(Object.entries(boardToSave.sub?.teams || {}).map(([id, parties]) => [`sub:${id}`, parties])) };
+    const snapshot = { id: targetId || crypto.randomUUID(), name: name.trim(), createdAt: existing?.createdAt || new Date().toISOString(), ...boardToSave, memberNames: formationMemberNames(memberNameTeams, members) };
     operationRef.current = true; setBusy(true); setNotice('');
     try {
       if (firebaseEnabled) {
