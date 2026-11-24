@@ -81,7 +81,7 @@ function GearDistribution({ distribution }) {
 
 function Ranking({ metric }) {
   return <div className="rd-table-wrap"><table><thead><tr><th>#</th><th>PLAYER</th><th>CLASS</th><th>{metric.valueLabel}</th></tr></thead><tbody>
-    {metric.top10.map((member, index) => <tr key={`${member.name}-${index}`}><td className="rd-rank">{index + 1}</td><td>{member.name}</td><td><span className="rd-class-name"><JobIcon className={member.className}/>{member.className}</span></td><td>{whole(member.score)}</td></tr>)}
+    {metric.top10.map((member, index) => <tr key={`${member.name}-${index}`}><td className="rd-rank">{index + 1}</td><td>{member.name}</td><td><span className="rd-class-name"><JobIcon className={member.className}/>{member.className}</span></td><td>{metric.days ? `${whole(member.score)} days` : whole(member.score)}</td></tr>)}
     {!metric.top10.length && <tr><td colSpan="4" className="rd-empty-cell">{metric.emptyMessage}</td></tr>}
   </tbody></table></div>;
 }
@@ -94,6 +94,7 @@ export default function RosterDashboard({ members }) {
     lifetime: { ...analytics.lifetimeContribution, title: 'Lifetime Contribution Ranking', valueLabel: 'LIFETIME', summary: `${whole(analytics.lifetimeContribution.total)} TOTAL`, emptyMessage: 'No lifetime contribution data is available.' },
     highestGear: { ...analytics.highestGearRanking, title: 'Highest GR Ranking', valueLabel: 'GR', summary: `${analytics.gearCount} SCORED MEMBERS`, emptyMessage: 'No gear score data is available.' },
     lowestGear: { ...analytics.lowestGearRanking, title: 'Lowest GR Ranking', valueLabel: 'GR', summary: `${analytics.gearCount} SCORED MEMBERS`, emptyMessage: 'No gear score data is available.' },
+    inactive: { ...analytics.inactiveRanking, title: 'Inactive Ranking', valueLabel: 'DAYS ABSENT', summary: `${analytics.inactiveRanking.count} INACTIVE 2+ DAYS`, emptyMessage: 'No members have been inactive for 2 or more days.', days: true },
   };
   const currentRanking = rankings[rankingMode];
   return <main className="page wide rd-page">
@@ -111,9 +112,9 @@ export default function RosterDashboard({ members }) {
     <div className="rd-bottom-grid">
       <section className="rd-panel rd-ranking">
         <div className="rd-tabs" role="group" aria-label="Member rankings">
-          {[["weekly", "Weekly Contribution"], ["lifetime", "Lifetime Contribution"], ["highestGear", "Top 10 Highest GR"], ["lowestGear", "Top 10 Lowest GR"]].map(([key, label]) => <button key={key} className={rankingMode === key ? 'selected' : ''} aria-pressed={rankingMode === key} onClick={() => setRankingMode(key)}>{label}</button>)}
+          {[["weekly", "Weekly Contribution"], ["lifetime", "Lifetime Contribution"], ["highestGear", "Top 10 Highest GR"], ["lowestGear", "Top 10 Lowest GR"], ["inactive", "Inactive"]].map(([key, label]) => <button key={key} className={rankingMode === key ? 'selected' : ''} aria-pressed={rankingMode === key} onClick={() => setRankingMode(key)}>{label}</button>)}
         </div>
-        <header className="rd-panel-heading"><h2>🏆 {currentRanking.title} (Top 10)</h2><span>{currentRanking.summary}</span></header>
+        <header className="rd-panel-heading"><h2>🏆 {currentRanking.title}{currentRanking.days ? '' : ' (Top 10)'}</h2><span>{currentRanking.summary}</span></header>
         <Ranking metric={currentRanking}/>
       </section>
       <section className="rd-panel rd-strength"><header className="rd-panel-heading"><h2><Icon type="gear"/>Combat Strength</h2></header><div className="rd-strength-content"><div className="rd-highlights">
