@@ -6,13 +6,14 @@ import { auth, db, firebaseEnabled } from './firebase/config';
 import Settings from './pages/Settings';
 import AccountGate from './components/AccountGate';
 import { formationMemberNames, prepareFormation } from './firebase/teams';
-import { autoBalanceBoard, blankBoard, blankStaticBoard, boardError, BOARD_MODES, changeBoardMode, formationSaveError, normalizeBoard, normalizeStaticBoard, serializeBoard } from './firebase/board';
+import { autoBalanceBoard, blankBoard, blankStaticBoard, boardError, BOARD_MODES, formationSaveError, normalizeBoard, normalizeStaticBoard, serializeBoard } from './firebase/board';
 import { prepareRosterImport, reconcileSavedFormation, replaceGuildRoster } from './firebase/importRoster';
 import { attendanceRecordId } from './utils/attendance';
 
 const seedMembers = [];
 const stored = key => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
 const boardMetaId = '_meta';
+const battleModes = Object.keys(BOARD_MODES);
 const teamRecord = (value, id) => { const groups = serializeBoard(value).groups; const index = groups.findIndex(group => group.id === id); return index < 0 ? null : { ...groups[index], order: index }; };
 const boardFromTeamDocs = (snap, fallbackMode) => { const meta = snap.docs.find(item => item.id === boardMetaId)?.data() || {}; return normalizeBoard({ mode: meta.mode || fallbackMode, sub: meta.sub, teams: { groups: snap.docs.filter(item => item.id !== boardMetaId).sort((a, b) => (a.data().order ?? Number.MAX_SAFE_INTEGER) - (b.data().order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id)).map(item => ({ id: item.id, name: item.data().name || '', parties: item.data().parties || [] })) } }); };
 export default function App() {
@@ -38,6 +39,11 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   const [loaded, setLoaded] = useState(!firebaseEnabled);
   const [members, setMembers] = useState(() => firebaseEnabled ? [] : stored('row-members') || seedMembers);
   const [board, setBoard] = useState(() => normalizeBoard(firebaseEnabled ? blankBoard() : stored('row-teams') || blankBoard()));
+  const [modeBoards, setModeBoards] = useState(() => {
+    const savedModes = stored('row-team-modes') || {};
+    const legacyBoard = normalizeBoard(stored('row-teams') || blankBoard());
+    return Object.fromEntries(battleModes.map(mode => [mode, normalizeBoard(savedModes[mode] || (mode === legacyBoard.mode ? legacyBoard : blankBoard(mode)))]));
+  });
   const teams = board.teams;
   const [staticBoard, setStaticBoard] = useState(() => normalizeStaticBoard(firebaseEnabled ? blankStaticBoard() : stored('row-static-teams') || blankStaticBoard()));
   const [staticDraft, setStaticDraft] = useState(() => normalizeStaticBoard(firebaseEnabled ? blankStaticBoard() : stored('row-static-teams') || blankStaticBoard()));
@@ -51,6 +57,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   const [activeSaveId, setActiveSaveId] = useState(null);
   const [loadedSaveId, setLoadedSaveId] = useState(null);
   const boardRef = useRef(board);
+  const modeBoardsRef = useRef(modeBoards);
   const confirmedBoardRef = useRef(board);
   const collabBoardReadyRef = useRef(false);
   const staticBoardRef = useRef(staticBoard);
@@ -80,26 +87,38 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
         mark('teams');
       } }, failed),
       onSnapshot(collection(db, 'guilds', guildId, 'savedTeams'), snap => { if (active) { setSavedTeams(snap.docs.map(item => ({ ...item.data(), id: item.id, ...normalizeBoard(item.data().teams) })).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))); mark('saved'); } }, failed),
-      onSnapshot(collection(db, 'guilds', guildId, 'teamBoards'), snap => { if (!active) return;
-        const meta = snap.docs.find(item => item.id === boardMetaId);
-        if (!meta) {
-          if (role !== 'Viewer') runTransaction(db, async transaction => {
-            const metaRef = doc(db, 'guilds', guildId, 'teamBoards', boardMetaId);
-            const savedMeta = await transaction.get(metaRef);
-            if (savedMeta.exists()) return;
-            const guildRef = doc(db, 'guilds', guildId);
-            const savedGuild = await transaction.get(guildRef);
-            const legacy = normalizeBoard(savedGuild.data()?.teams || blankBoard());
-            for (const [order, group] of serializeBoard(legacy).groups.entries()) transaction.set(doc(db, 'guilds', guildId, 'teamBoards', group.id), { name: group.name, parties: group.parties, order, updatedAt: serverTimestamp() });
-            transaction.set(metaRef, { mode: legacy.mode, schemaVersion: 1, updatedAt: serverTimestamp() });
-          }).catch(failed);
-          return;
+      onSnapshot(collection(db, 'guilds', guildId, 'teamBoardsByMode'), snap => { if (!active) return;
+        const nextModes = Object.fromEntries(battleModes.map(mode => {
+          const item = snap.docs.find(entry => entry.id === mode);
+          return [mode, item ? normalizeBoard(item.data()) : blankBoard(mode)];
+        }));
+        modeBoardsRef.current = nextModes; setModeBoards(nextModes);
+        collabBoardReadyRef.current = snap.docs.length === battleModes.length;
+        if (collabBoardReadyRef.current && !teamSaveActiveRef.current) {
+          const selected = nextModes[boardRef.current.mode] || blankBoard('guild-league');
+          boardRef.current = selected; confirmedBoardRef.current = selected; setBoard(selected);
+          mark('teams');
         }
-        collabBoardReadyRef.current = true;
-        const next = boardFromTeamDocs(snap, 'guild-league');
-        confirmedBoardRef.current = next;
-        if (!teamSaveActiveRef.current) { boardRef.current = next; setBoard(next); }
-        mark('teams');
+        if (role === 'Viewer' && !snap.docs.length) getDocs(collection(db, 'guilds', guildId, 'teamBoards')).then(legacySnapshot => {
+          if (!active) return;
+          const legacy = boardFromTeamDocs(legacySnapshot, normalizeBoard(guild?.teams).mode);
+          modeBoardsRef.current = { ...nextModes, [legacy.mode]: legacy }; setModeBoards(modeBoardsRef.current);
+          boardRef.current = legacy; confirmedBoardRef.current = legacy; setBoard(legacy); mark('teams');
+        }).catch(failed);
+        if (role !== 'Viewer' && snap.docs.length < battleModes.length) getDocs(collection(db, 'guilds', guildId, 'teamBoards')).then(legacySnapshot => runTransaction(db, async transaction => {
+          const modeRefs = battleModes.map(mode => [mode, doc(db, 'guilds', guildId, 'teamBoardsByMode', mode)]);
+          const existing = await Promise.all(modeRefs.map(([, ref]) => transaction.get(ref)));
+          if (existing.every(item => item.exists())) return;
+          const legacyGuild = await transaction.get(doc(db, 'guilds', guildId));
+          const legacyMeta = await transaction.get(doc(db, 'guilds', guildId, 'teamBoards', boardMetaId));
+          const legacyMode = legacyMeta.exists() ? legacyMeta.data().mode : normalizeBoard(legacyGuild.data()?.teams).mode;
+          const legacy = boardFromTeamDocs(legacySnapshot, legacyMode);
+          modeRefs.forEach(([mode, ref], index) => {
+            if (existing[index].exists()) return;
+            const seed = mode === legacyMode ? legacy : blankBoard(mode);
+            transaction.set(ref, { ...serializeBoard(seed), updatedAt: serverTimestamp() });
+          });
+        })).catch(failed);
       }, failed),
       onSnapshot(doc(db, 'guilds', guildId, 'staticBoard', 'board'), snap => { if (active) {
         const next = normalizeStaticBoard(snap.exists() ? snap.data().teams : blankStaticBoard());
@@ -115,6 +134,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-members', JSON.stringify(members)); }, [members]);
   useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-saved-teams', JSON.stringify(savedTeams)); }, [savedTeams]);
   useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-teams', JSON.stringify(board)); }, [board]);
+  useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-team-modes', JSON.stringify(modeBoards)); }, [modeBoards]);
   useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-static-teams', JSON.stringify(staticBoard)); }, [staticBoard]);
   useEffect(() => { if (!firebaseEnabled) localStorage.setItem('row-attendance', JSON.stringify(attendanceRows)); }, [attendanceRows]);
   useEffect(() => {
@@ -241,40 +261,35 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
     const persist = async () => {
       if (queuedTeamSaveFailedRef.current) return false;
       try {
+        let persistedBoard = updated;
         if (firebaseEnabled) await runTransaction(db, async transaction => {
-        const metaRef = doc(db, 'guilds', guildId, 'teamBoards', boardMetaId);
-        const loadedSaveRef = loadedSaveId && !skipLoadedAutoSave ? doc(db, 'guilds', guildId, 'savedTeams', loadedSaveId) : null;
-        const meta = await transaction.get(metaRef);
-        if (!meta.exists() || meta.data().mode !== before.mode) throw Object.assign(new Error('Board changed'), { code: 'formation/conflict' });
-        const refs = [...ids].map(id => [id, doc(db, 'guilds', guildId, 'teamBoards', id)]);
-        const [snapshots, loadedSave] = await Promise.all([
-          Promise.all(refs.map(([, ref]) => transaction.get(ref))),
-          loadedSaveRef ? transaction.get(loadedSaveRef) : Promise.resolve(null),
-        ]);
-        const currentRecords = new Map(refs.map(([id], index) => [id, snapshots[index].exists() ? { id, name: snapshots[index].data().name || '', parties: snapshots[index].data().parties || [], order: snapshots[index].data().order ?? 0 } : null]));
-        for (const id of changedIds) if (JSON.stringify(currentRecords.get(id)) !== JSON.stringify(teamRecord(before, id))) throw Object.assign(new Error('Team changed'), { code: 'formation/conflict' });
-        const candidate = normalizeBoard({ mode: before.mode, teams: { groups: [...currentRecords.values()].filter(Boolean).map(record => ({ id: record.id, name: record.name, parties: record.parties })) } });
-        for (const id of changedIds) {
-          const record = teamRecord(updated, id);
-          if (!record) { delete candidate.teams[id]; delete candidate.teamNames[id]; delete candidate.groupNames[id]; }
-          else { candidate.teams[id] = updated.teams[id]; candidate.teamNames[id] = updated.teamNames[id]; candidate.groupNames[id] = updated.groupNames[id]; }
-        }
-        candidate.mode = updated.mode;
-        if (boardError(candidate)) throw Object.assign(new Error('Board changed'), { code: 'formation/conflict' });
-        for (const id of changedIds) {
-          const ref = doc(db, 'guilds', guildId, 'teamBoards', id);
-          const record = teamRecord(updated, id);
-          if (!record) transaction.delete(ref);
-          else transaction.set(ref, { name: record.name, parties: record.parties, order: record.order, updatedAt: serverTimestamp() });
-        }
-        if (loadedSaveRef && loadedSave?.exists()) {
-          const loaded = loadedSave.data();
-          const autosaved = { ...updated, id: loadedSaveId, name: loaded.name || 'Loaded formation', createdAt: loaded.createdAt || new Date().toISOString(), memberNames: formationMemberNames(updated.teams, members) };
-          transaction.update(loadedSaveRef, { teams: serializeBoard(autosaved), memberNames: autosaved.memberNames, updatedAt: new Date().toISOString() });
-        }
-        if (modeChanged || subChanged) transaction.update(metaRef, { ...(modeChanged ? { mode: updated.mode } : {}), ...(subChanged ? { sub: updated.sub ? { groups: Object.keys(updated.sub.teams).map(id => ({ id, name: updated.sub.groupNames[id], parties: updated.sub.teams[id].map((slots, index) => ({ slots, name: updated.sub.teamNames[id]?.[index] || '' })) })) } : null } : {}), updatedAt: serverTimestamp() });
+          const boardRefForMode = doc(db, 'guilds', guildId, 'teamBoardsByMode', before.mode);
+          const loadedSaveRef = loadedSaveId && !skipLoadedAutoSave ? doc(db, 'guilds', guildId, 'savedTeams', loadedSaveId) : null;
+          const [savedBoard, loadedSave] = await Promise.all([transaction.get(boardRefForMode), loadedSaveRef ? transaction.get(loadedSaveRef) : Promise.resolve(null)]);
+          const current = savedBoard.exists() ? normalizeBoard(savedBoard.data()) : blankBoard(before.mode);
+          for (const id of changedIds) if (JSON.stringify(teamRecord(current, id)) !== JSON.stringify(teamRecord(before, id))) throw Object.assign(new Error('Board changed'), { code: 'formation/conflict' });
+          if (subChanged && JSON.stringify(current.sub) !== JSON.stringify(before.sub)) throw Object.assign(new Error('Board changed'), { code: 'formation/conflict' });
+          const candidate = normalizeBoard(current);
+          for (const id of changedIds) {
+            if (!Object.hasOwn(updated.teams, id)) { delete candidate.teams[id]; delete candidate.teamNames[id]; delete candidate.groupNames[id]; }
+            else { candidate.teams[id] = updated.teams[id]; candidate.teamNames[id] = updated.teamNames[id]; candidate.groupNames[id] = updated.groupNames[id]; }
+          }
+          if (subChanged) candidate.sub = updated.sub;
+          if (boardError(candidate)) throw Object.assign(new Error('Board changed'), { code: 'formation/conflict' });
+          persistedBoard = candidate;
+          transaction.set(boardRefForMode, { ...serializeBoard(candidate), updatedAt: serverTimestamp() });
+          if (loadedSaveRef && loadedSave?.exists()) {
+            const loaded = loadedSave.data();
+            const autosaved = { ...updated, id: loadedSaveId, name: loaded.name || 'Loaded formation', createdAt: loaded.createdAt || new Date().toISOString(), memberNames: formationMemberNames(updated.teams, members) };
+            transaction.update(loadedSaveRef, { teams: serializeBoard(autosaved), memberNames: autosaved.memberNames, updatedAt: new Date().toISOString() });
+          }
         });
-        else confirmedBoardRef.current = updated;
+        else {
+          confirmedBoardRef.current = persistedBoard;
+        }
+        confirmedBoardRef.current = persistedBoard;
+        const nextModes = { ...modeBoardsRef.current, [updated.mode]: persistedBoard };
+        modeBoardsRef.current = nextModes; setModeBoards(nextModes);
         if (loadedSaveId && !skipLoadedAutoSave) {
           setSavedTeams(current => current.map(item => item.id === loadedSaveId ? { ...item, ...updated, memberNames: formationMemberNames(updated.teams, members), updatedAt: new Date().toISOString() } : item));
         }
@@ -283,7 +298,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
       } catch (failure) {
         queuedTeamSaveFailedRef.current = true;
         if (failure.code === 'formation/conflict') setError('Someone changed this team or battle mode while you were editing. The latest board is syncing; try that change again.');
-        else if (failure.code === 'permission-denied') setError('Firestore rejected this board update. Deploy the updated firestore.rules to allow Guild League SUB lineups, then try again.');
+        else if (failure.code === 'permission-denied') setError('Firestore rejected this board update. Deploy the latest firestore.rules, then try again.');
         else reportFailure();
         return false;
       }
@@ -296,7 +311,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
         if (queuedTeamSaveFailedRef.current) {
           boardRef.current = confirmedBoardRef.current;
           setBoard(confirmedBoardRef.current);
-        }
+        } else { boardRef.current = confirmedBoardRef.current; setBoard(confirmedBoardRef.current); }
         queuedTeamSaveFailedRef.current = false;
         teamSaveActiveRef.current = false;
         operationRef.current = false;
@@ -407,12 +422,16 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   };
   const clearTeams = () => saveTeams(blankBoard(boardRef.current.mode));
   const clearStaticTeams = () => updateStaticDraft(blankStaticBoard());
-  const selectMode = mode => {
+  const selectMode = async mode => {
     if (mode === boardRef.current.mode) return;
-    const next = changeBoardMode(boardRef.current, mode);
-    const removedTeams = Object.values(boardRef.current.teams).flat().length - Object.values(next.teams).flat().length;
-    if (removedTeams > 0 && !window.confirm(`Switch to ${BOARD_MODES[mode].name}? ${removedTeams} excess ${removedTeams === 1 ? 'party' : 'parties'} will be removed and their players returned to Available Members.`)) return;
-    saveTeams(next);
+    if (!battleModes.includes(mode)) return;
+    const next = modeBoardsRef.current[mode] || blankBoard(mode);
+    boardRef.current = next; confirmedBoardRef.current = next; setBoard(next);
+    setLoadedSaveId(null); setActiveSaveId(null); setError('');
+    if (!firebaseEnabled) {
+      const nextModes = { ...modeBoardsRef.current, [mode]: next };
+      modeBoardsRef.current = nextModes; setModeBoards(nextModes);
+    }
   };
   const saveTeam = async (name, targetId = null, currentBoard = boardRef.current) => {
     if (role === 'Viewer' || operationRef.current || !name.trim() || name.trim().length > 80) return false;
@@ -443,6 +462,7 @@ function GuildWorkspace({ user, guild, exitDemo, role = 'Account owner' }) {
   };
   const loadTeam = async snapshot => {
     const saved = normalizeBoard(snapshot);
+    if (saved.mode !== boardRef.current.mode) await selectMode(saved.mode);
     const prepared = prepareFormation(saved.teams, members, saved.groupNames, saved.teamNames, snapshot.memberNames);
     const success = await saveTeams({ ...saved, teams: prepared.teams }, { skipLoadedAutoSave: true });
     if (success) { setActiveSaveId(snapshot.id); setLoadedSaveId(snapshot.id); }

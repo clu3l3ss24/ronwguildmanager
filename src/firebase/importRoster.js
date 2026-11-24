@@ -1,5 +1,5 @@
 import { collection, doc, getDoc, getDocs, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { blankBoard, blankStaticBoard, normalizeBoard, normalizeStaticBoard, serializeBoard } from './board.js';
+import { blankStaticBoard, normalizeBoard, normalizeStaticBoard, serializeBoard } from './board.js';
 import { formationMemberNames, prepareFormation } from './teams.js';
 
 export function prepareRosterImport(roster, existingMembers) {
@@ -55,21 +55,14 @@ export function reconcileSavedFormation(value, members, previousMembers, previou
 
 export async function replaceGuildRoster(db, guildId, roster) {
   const staticRef = doc(db, 'guilds', guildId, 'staticBoard', 'board');
-  const [current, guild, saves, teamBoards, savedStatic] = await Promise.all([getDocs(collection(db, 'guilds', guildId, 'members')), getDoc(doc(db, 'guilds', guildId)), getDocs(collection(db, 'guilds', guildId, 'savedTeams')), getDocs(collection(db, 'guilds', guildId, 'teamBoards')), getDoc(staticRef)]);
+  const [current, saves, savedStatic, modeBoards] = await Promise.all([getDocs(collection(db, 'guilds', guildId, 'members')), getDocs(collection(db, 'guilds', guildId, 'savedTeams')), getDoc(staticRef), getDocs(collection(db, 'guilds', guildId, 'teamBoardsByMode'))]);
   const previousMembers = current.docs.map(item => ({ ...item.data(), id: item.id }));
   const prepared = prepareRosterImport(roster, previousMembers);
   const staticBoard = normalizeStaticBoard(savedStatic.exists() ? savedStatic.data().teams : blankStaticBoard());
   const previousStaticNames = formationMemberNames(staticBoard.teams, previousMembers);
   const reconciledStatic = prepareFormation(staticBoard.teams, prepared.members, staticBoard.groupNames, staticBoard.teamNames, previousStaticNames);
   const nextStatic = { ...staticBoard, teams: reconciledStatic.teams };
-  const activeMeta = teamBoards.docs.find(item => item.id === '_meta')?.data() || {};
-  const activeBoard = normalizeBoard({
-    mode: activeMeta.mode || normalizeBoard(guild.data()?.teams).mode,
-    sub: activeMeta.sub,
-    teams: { groups: teamBoards.docs.filter(item => item.id !== '_meta').sort((a, b) => (a.data().order ?? Number.MAX_SAFE_INTEGER) - (b.data().order ?? Number.MAX_SAFE_INTEGER)).map(item => ({ id: item.id, name: item.data().name || '', parties: item.data().parties || [] })) },
-  });
-  const reconciledActive = reconcileSavedFormation(activeBoard, prepared.members, previousMembers);
-  const removedActiveMembers = reconciledActive.removedMembers.map(member => ({ ...member, formationName: 'Active Team Builder' }));
+  const removedActiveMembers = [];
   const retained = new Set(prepared.members.map(member => member.id));
   const batch = writeBatch(db);
   // Clean departed members out of every saved battle mode and both Guild League sides.
@@ -85,11 +78,12 @@ export async function replaceGuildRoster(db, guildId, roster) {
   // Update retained players in place instead of deleting and recreating them.
   current.docs.filter(item => !retained.has(item.id)).forEach(item => batch.delete(item.ref));
   prepared.members.forEach(member => batch.set(doc(db, 'guilds', guildId, 'members', member.id), member));
+  modeBoards.docs.forEach(item => {
+    const reconciled = reconcileSavedFormation(item.data(), prepared.members, previousMembers);
+    removedActiveMembers.push(...reconciled.removedMembers.map(member => ({ ...member, formationName: `Active Team Builder · ${item.id}` })));
+    batch.set(item.ref, { ...serializeBoard(reconciled.board), updatedAt: serverTimestamp() });
+  });
   const boardEditId = crypto.randomUUID();
-  const boardMode = normalizeBoard(guild.data()?.teams).mode;
-  teamBoards.docs.filter(item => item.id !== '_meta').forEach(item => batch.delete(item.ref));
-  batch.set(doc(db, 'guilds', guildId, 'teamBoards', '_meta'), { mode: boardMode, schemaVersion: 1, updatedAt: serverTimestamp() });
-  batch.update(doc(db, 'guilds', guildId), { teams: serializeBoard(blankBoard(boardMode)), boardEditId, updatedAt: serverTimestamp() });
   const staticBoardEditId = crypto.randomUUID();
   batch.set(staticRef, { teams: serializeBoard(nextStatic), boardEditId: staticBoardEditId, updatedAt: serverTimestamp() });
   // Roster replacement, event-board reset and static-member reconciliation are atomic.

@@ -137,6 +137,21 @@ service cloud.firestore {
             && request.resource.data.updatedAt == request.time;
         allow delete: if teamId != '_meta' && canManageGuild(guildId);
       }
+      // Each battle mode has an independent shared Team Builder document.
+      // Clients in the same mode receive the same live snapshot; other modes
+      // have separate documents and cannot overwrite one another.
+      match /teamBoardsByMode/{modeId} {
+        allow get, list: if canReadGuild(guildId);
+        allow create, update: if modeId in ['guild-league', 'polarity-zone', 'siege']
+          && canManageGuild(guildId)
+          && request.resource.data.keys().hasOnly(['mode', 'schemaVersion', 'groups', 'sub', 'updatedAt'])
+          && request.resource.data.mode == modeId
+          && request.resource.data.schemaVersion == 2
+          && request.resource.data.groups is list
+          && (!('sub' in request.resource.data) || request.resource.data.sub == null || request.resource.data.sub is map)
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if modeId in ['guild-league', 'polarity-zone', 'siege'] && canManageGuild(guildId);
+      }
       match /teamBuilderPresence/{uid} {
         allow get, list: if canReadGuild(guildId);
         allow create, update: if uid == request.auth.uid
