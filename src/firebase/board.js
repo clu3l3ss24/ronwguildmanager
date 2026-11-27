@@ -5,6 +5,7 @@ export const BOARD_MODES = {
   'polarity-zone': { name: 'Polarity Zone', players: 50 },
   siege: { name: 'Siege', players: Infinity },
 };
+export const MAX_PARTIES_PER_TEAM = 8;
 const LEGACY_LANES = ['top', 'middle', 'bottom', 'flex'];
 
 export function normalizeBoard(value) {
@@ -75,6 +76,10 @@ export function serializeBoard(value) {
 
 export function boardError(value, { allowUnlimitedParties = false } = {}) {
   const board = normalizeBoard(value);
+  const teamSets = [board.teams, ...(board.sub ? [board.sub.teams] : [])];
+  if (!allowUnlimitedParties && teamSets.some(teams => Object.values(teams).some(parties => parties.length > MAX_PARTIES_PER_TEAM))) {
+    return `Each team can contain at most ${MAX_PARTIES_PER_TEAM} parties.`;
+  }
   const parties = Object.values(board.teams).flat();
   const limit = BOARD_MODES[board.mode].players;
   if (!allowUnlimitedParties && parties.length > limit / 5) return `${BOARD_MODES[board.mode].name} allows up to ${limit} players in ${limit / 5} five-person parties.`;

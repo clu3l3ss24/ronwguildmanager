@@ -131,7 +131,7 @@ service cloud.firestore {
             && request.resource.data.name is string
             && request.resource.data.name.size() <= 60
             && request.resource.data.parties is list
-            && request.resource.data.parties.size() <= 18
+            && request.resource.data.parties.size() <= 8
             && request.resource.data.order is int
             && request.resource.data.order >= 0
             && request.resource.data.updatedAt == request.time;
